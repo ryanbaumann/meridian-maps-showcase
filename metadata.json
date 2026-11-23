@@ -1,0 +1,10 @@
+{
+  "name": "Real-World Reasoning Agent - Specialist Finder",
+  "description": "Fast, map-first healthcare specialist discovery powered by Gemini 4 Hydrogen with Google Maps grounding, real-time travel time ranking, and interactive route previews.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

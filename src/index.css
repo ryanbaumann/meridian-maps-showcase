@@ -1,0 +1,406 @@
+@import "tailwindcss";
+
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
+
+@property --animation-reduced {
+  syntax: "*";
+  inherits: false;
+  initial-value: none;
+}
+
+@property --arc-start {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --arc-end {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --progress-dash-animation {
+  syntax: "*";
+  inherits: false;
+  initial-value: , progress-dash 2.6s ease-in-out infinite;
+}
+
+:root {
+  /* Semantic light/dark raw pairs (cool neutral slate + single locked teal accent) */
+  --bg-light: #f4f6f8;
+  --bg-dark: #0b1117;
+  --surface-light: #ffffff;
+  --surface-dark: #111923;
+  --surface-subtle-light: #f1f5f9;
+  --surface-subtle-dark: #182330;
+  --ink-light: #0f172a;
+  --ink-dark: #f1f5f9;
+  --muted-light: #475569;
+  --muted-dark: #94a3b8;
+  --line-light: #e2e8f0;
+  --line-dark: #243242;
+  /* >=3:1 WCAG 1.4.11 non-text contrast for interactive form borders and checkboxes */
+  --control-line-light: #7b8ca1;
+  --control-line-dark: #64748b;
+  --accent-light: #0f766e;
+  --accent-dark: #14b8a6;
+  --accent-text-light: #0f766e;
+  --accent-text-dark: #2dd4bf;
+  --accent-ink-light: #ffffff;
+  --accent-ink-dark: #042f2e;
+  --accent-soft-light: #f0fdfa;
+  --accent-soft-dark: #0d2b2a;
+
+  /* Status tokens (>=4.5:1 contrast in both light and dark modes) */
+  --status-open-light: #047857;
+  --status-open-dark: #34d399;
+  --status-error-light: #9f1239;
+  --status-error-dark: #fda4af;
+  --status-error-bg-light: #fff1f2;
+  --status-error-bg-dark: #2a1219;
+  --status-error-border-light: #fecdd3;
+  --status-error-border-dark: #881337;
+  --status-warn-light: #78350f;
+  --status-warn-dark: #fde68a;
+  --status-warn-bg-light: #fffbeb;
+  --status-warn-bg-dark: #261b0b;
+  --status-warn-border-light: #fde68a;
+  --status-warn-border-dark: #78350f;
+
+  --scrollbar-thumb-light: rgba(15, 23, 42, 0.28);
+  --scrollbar-thumb-dark: rgba(241, 245, 249, 0.28);
+  --scrollbar-track-light: transparent;
+  --scrollbar-track-dark: transparent;
+
+  /* Default to light values; dark fallback via prefers-color-scheme for older engines */
+  --bg: var(--bg-light);
+  --surface: var(--surface-light);
+  --surface-subtle: var(--surface-subtle-light);
+  --ink: var(--ink-light);
+  --muted: var(--muted-light);
+  --line: var(--line-light);
+  --control-line: var(--control-line-light);
+  --accent: var(--accent-light);
+  --accent-text: var(--accent-text-light);
+  --accent-ink: var(--accent-ink-light);
+  --accent-soft: var(--accent-soft-light);
+  --status-open: var(--status-open-light);
+  --status-error: var(--status-error-light);
+  --status-error-bg: var(--status-error-bg-light);
+  --status-error-border: var(--status-error-border-light);
+  --status-warn: var(--status-warn-light);
+  --status-warn-bg: var(--status-warn-bg-light);
+  --status-warn-border: var(--status-warn-border-light);
+  --scrollbar-thumb: var(--scrollbar-thumb-light);
+  --scrollbar-track: var(--scrollbar-track-light);
+
+  color-scheme: light dark;
+  accent-color: var(--accent);
+  interpolate-size: allow-keywords;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: var(--bg-dark);
+    --surface: var(--surface-dark);
+    --surface-subtle: var(--surface-subtle-dark);
+    --ink: var(--ink-dark);
+    --muted: var(--muted-dark);
+    --line: var(--line-dark);
+    --control-line: var(--control-line-dark);
+    --accent: var(--accent-dark);
+    --accent-text: var(--accent-text-dark);
+    --accent-ink: var(--accent-ink-dark);
+    --accent-soft: var(--accent-soft-dark);
+    --status-open: var(--status-open-dark);
+    --status-error: var(--status-error-dark);
+    --status-error-bg: var(--status-error-bg-dark);
+    --status-error-border: var(--status-error-border-dark);
+    --status-warn: var(--status-warn-dark);
+    --status-warn-bg: var(--status-warn-bg-dark);
+    --status-warn-border: var(--status-warn-border-dark);
+    --scrollbar-thumb: var(--scrollbar-thumb-dark);
+    --scrollbar-track: var(--scrollbar-track-dark);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: var(--bg-dark);
+  --surface: var(--surface-dark);
+  --surface-subtle: var(--surface-subtle-dark);
+  --ink: var(--ink-dark);
+  --muted: var(--muted-dark);
+  --line: var(--line-dark);
+  --control-line: var(--control-line-dark);
+  --accent: var(--accent-dark);
+  --accent-text: var(--accent-text-dark);
+  --accent-ink: var(--accent-ink-dark);
+  --accent-soft: var(--accent-soft-dark);
+  --status-open: var(--status-open-dark);
+  --status-error: var(--status-error-dark);
+  --status-error-bg: var(--status-error-bg-dark);
+  --status-error-border: var(--status-error-border-dark);
+  --status-warn: var(--status-warn-dark);
+  --status-warn-bg: var(--status-warn-bg-dark);
+  --status-warn-border: var(--status-warn-border-dark);
+  --scrollbar-thumb: var(--scrollbar-thumb-dark);
+  --scrollbar-track: var(--scrollbar-track-dark);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+@supports (color: light-dark(white, black)) {
+  :root {
+    --bg: light-dark(var(--bg-light), var(--bg-dark));
+    --surface: light-dark(var(--surface-light), var(--surface-dark));
+    --surface-subtle: light-dark(var(--surface-subtle-light), var(--surface-subtle-dark));
+    --ink: light-dark(var(--ink-light), var(--ink-dark));
+    --muted: light-dark(var(--muted-light), var(--muted-dark));
+    --line: light-dark(var(--line-light), var(--line-dark));
+    --control-line: light-dark(var(--control-line-light), var(--control-line-dark));
+    --accent: light-dark(var(--accent-light), var(--accent-dark));
+    --accent-text: light-dark(var(--accent-text-light), var(--accent-text-dark));
+    --accent-ink: light-dark(var(--accent-ink-light), var(--accent-ink-dark));
+    --accent-soft: light-dark(var(--accent-soft-light), var(--accent-soft-dark));
+    --status-open: light-dark(var(--status-open-light), var(--status-open-dark));
+    --status-error: light-dark(var(--status-error-light), var(--status-error-dark));
+    --status-error-bg: light-dark(var(--status-error-bg-light), var(--status-error-bg-dark));
+    --status-error-border: light-dark(var(--status-error-border-light), var(--status-error-border-dark));
+    --status-warn: light-dark(var(--status-warn-light), var(--status-warn-dark));
+    --status-warn-bg: light-dark(var(--status-warn-bg-light), var(--status-warn-bg-dark));
+    --status-warn-border: light-dark(var(--status-warn-border-light), var(--status-warn-border-dark));
+    --scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
+    --scrollbar-track: light-dark(var(--scrollbar-track-light), var(--scrollbar-track-dark));
+  }
+}
+
+/* High-contrast reinforcement for scrollbars and subtle borders */
+@media (prefers-contrast: more) {
+  :root {
+    --line-light: #475569;
+    --line-dark: #cbd5e1;
+    --control-line-light: #0f172a;
+    --control-line-dark: #ffffff;
+    --scrollbar-thumb-light: #000000;
+    --scrollbar-track-light: #ffffff;
+    --scrollbar-thumb-dark: #ffffff;
+    --scrollbar-track-dark: #000000;
+  }
+}
+
+/* Windows Forced Colors (High Contrast) system color mapping */
+@media (forced-colors: active) {
+  :root {
+    --bg: Canvas;
+    --surface: Canvas;
+    --surface-subtle: Canvas;
+    --ink: CanvasText;
+    --muted: CanvasText;
+    --line: CanvasText;
+    --control-line: CanvasText;
+    --accent: Highlight;
+    --accent-text: LinkText;
+    --accent-ink: HighlightText;
+    --accent-soft: Canvas;
+    --status-open: CanvasText;
+    --status-error: CanvasText;
+    --status-error-bg: Canvas;
+    --status-error-border: CanvasText;
+    --status-warn: CanvasText;
+    --status-warn-bg: Canvas;
+    --status-warn-border: CanvasText;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    block-size: 100%;
+    inline-size: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    text-wrap: balance;
+  }
+
+  p,
+  blockquote {
+    text-wrap: pretty;
+    overflow-wrap: break-word;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--ink);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Canonical visually-hidden utility that reveals focusable skip links on focus */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Standard thin scrollbars with safe scroll containment and legacy WebKit fallback */
+.agent-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  .agent-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .agent-scroll::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  .agent-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+  }
+}
+
+/* Semantic indeterminate <progress> spinner with border-area + mask-image fallback */
+progress.loading-spinner:indeterminate::-webkit-progress-bar {
+  display: none;
+  background: none;
+}
+
+progress.loading-spinner:indeterminate::-webkit-progress-value {
+  display: none;
+  background: none;
+}
+
+progress.loading-spinner:indeterminate::-moz-progress-bar {
+  display: none;
+  background: none;
+}
+
+progress.loading-spinner:indeterminate::slider-fill {
+  display: none;
+  background: none;
+}
+
+progress.loading-spinner:indeterminate {
+  --_from: calc(90deg + var(--arc-start, 0deg));
+  --_to: calc(90deg + var(--arc-end, 158deg));
+  --size: 16px;
+  --thickness: 2px;
+  --spinner-duration: 1.3s;
+  --animation-reduced: progress-spin 6s linear infinite;
+
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  inline-size: var(--size);
+  block-size: var(--size);
+  border-radius: 50%;
+  appearance: none;
+  background: conic-gradient(
+      from var(--_from),
+      var(--accent) calc(var(--_to) - var(--_from)),
+      transparent 0
+    )
+    var(--line);
+  animation: progress-spin var(--spinner-duration) linear infinite
+    var(--progress-dash-animation, );
+}
+
+@supports (background-clip: border-area) {
+  progress.loading-spinner:indeterminate {
+    background-clip: border-area;
+    border: var(--thickness) solid transparent;
+    background-origin: border-box;
+  }
+}
+
+@supports not (background-clip: border-area) {
+  progress.loading-spinner:indeterminate {
+    --clip-boundary: calc(100% - var(--thickness));
+    mask-image: radial-gradient(
+      farthest-side,
+      transparent var(--clip-boundary),
+      black var(--clip-boundary)
+    );
+    border: 0;
+  }
+}
+
+@keyframes progress-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@keyframes progress-dash {
+  from {
+    --arc-start: 0deg;
+    --arc-end: 3deg;
+  }
+  50% {
+    --arc-start: 100deg;
+    --arc-end: 358deg;
+  }
+  to {
+    --arc-start: 360deg;
+    --arc-end: 363deg;
+  }
+}
+
+/* Reduced motion: use custom property overrides instead of jarring 0.01ms global resets */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: var(--animation-reduced, none) !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  progress.loading-spinner:indeterminate {
+    --arc-start: 0deg;
+    --arc-end: 158deg;
+  }
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      {
+        try {
+          const saved = localStorage.getItem('color-scheme');
+          if (saved === 'light' || saved === 'dark') {
+            const meta = document.querySelector('meta[name="color-scheme"]');
+            if (meta) meta.setAttribute('content', saved);
+            document.documentElement.style.colorScheme = saved;
+            document.documentElement.dataset.theme = saved;
+          }
+        } catch {
+          // Ignore storage restrictions in sandboxed frames
+        }
+      }
+    </script>
+    <title>Meridian — Specialist Finder</title>
+    <meta
+      name="description"
+      content="Map-first local discovery showcase with Google Maps Platform Vector and Photorealistic 3D maps, A2UI place cards, and Gemini 4 Hydrogen."
+    />
+    <meta property="og:title" content="Meridian — Specialist Finder" />
+    <meta
+      property="og:description"
+      content="Map-first local discovery showcase with Google Maps Platform Vector and Photorealistic 3D maps, A2UI place cards, and Gemini 4 Hydrogen."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://maps.googleapis.com" />
+    <link rel="dns-prefetch" href="https://maps.gstatic.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..600;1,9..40,400..600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
