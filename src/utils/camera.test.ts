@@ -113,7 +113,7 @@ describe('Vector and 3D camera target builders', () => {
     assert.ok(cam.zoom >= 13 && cam.zoom <= 16.8);
   });
 
-  it('resets tilt and heading to 0 on top-down or overview Vector camera', () => {
+  it('resets tilt and heading to 0 on top-down or overview Vector camera and fits wide spans', () => {
     const overview = computeVectorCameraTarget({
       origin: SF_ORIGIN,
       points: [SF_NORTH, SF_EAST, SF_SOUTH],
@@ -124,6 +124,21 @@ describe('Vector and 3D camera target builders', () => {
     });
     assert.equal(overview.tilt, 0);
     assert.equal(overview.heading, 0);
+
+    const wideSpread = computeVectorCameraTarget({
+      origin: SF_ORIGIN,
+      points: [
+        { lat: SF_ORIGIN.lat + 0.14, lng: SF_ORIGIN.lng + 0.14 },
+        { lat: SF_ORIGIN.lat - 0.12, lng: SF_ORIGIN.lng - 0.12 },
+      ],
+      focused: null,
+      tilted: false,
+      framing: MOBILE_PEEK_FRAMING,
+      fallbackCenter: SF_ORIGIN,
+    });
+    assert.equal(wideSpread.tilt, 0);
+    assert.equal(wideSpread.heading, 0);
+    assert.ok(wideSpread.zoom >= 9.5 && wideSpread.zoom < 11, `expected zoom in [9.5, 11), got ${wideSpread.zoom}`);
 
     const flatFocus = computeVectorCameraTarget({
       origin: SF_ORIGIN,
@@ -137,7 +152,7 @@ describe('Vector and 3D camera target builders', () => {
     assert.equal(flatFocus.heading, 0);
   });
 
-  it('builds corridor, street, overview, and orbit 3D cameras', () => {
+  it('builds building-safe, centered corridor, street, overview, and orbit 3D cameras with RELATIVE_TO_MESH', () => {
     const corridor = compute3DCameraTarget({
       origin: SF_ORIGIN,
       points: [SF_EAST],
@@ -146,9 +161,11 @@ describe('Vector and 3D camera target builders', () => {
       fallbackCenter: SF_ORIGIN,
       view: 'corridor',
     });
-    assert.equal(corridor.tilt, 62);
+    assert.equal(corridor.altitudeMode, 'RELATIVE_TO_MESH');
+    assert.equal(corridor.tilt, 52);
+    assert.ok(corridor.center.altitude > 0);
     assert.ok(Math.abs(corridor.heading - 90) <= 2);
-    assert.ok(corridor.range >= 950 && corridor.range <= 7200);
+    assert.ok(corridor.range >= 1200 && corridor.range <= 7800);
 
     const street = compute3DCameraTarget({
       origin: SF_ORIGIN,
@@ -158,9 +175,15 @@ describe('Vector and 3D camera target builders', () => {
       fallbackCenter: SF_ORIGIN,
       view: 'street',
     });
-    assert.equal(street.tilt, 74);
-    assert.equal(street.range, 340);
+    assert.equal(street.altitudeMode, 'RELATIVE_TO_MESH');
+    assert.equal(street.center.lat, SF_EAST.lat);
+    assert.equal(street.center.lng, SF_EAST.lng);
+    assert.ok(street.center.altitude >= 20);
+    assert.equal(street.tilt, 58);
+    assert.equal(street.range, 520);
     assert.ok(Math.abs(street.heading - 90) <= 2);
+    const streetClearanceM = street.center.altitude + street.range * Math.cos((street.tilt * Math.PI) / 180);
+    assert.ok(streetClearanceM >= 250, `expected >= 250m vertical clearance, got ${streetClearanceM}`);
 
     const overview = compute3DCameraTarget({
       origin: SF_ORIGIN,
@@ -170,15 +193,20 @@ describe('Vector and 3D camera target builders', () => {
       fallbackCenter: SF_ORIGIN,
       view: 'overview',
     });
-    assert.equal(overview.tilt, 38);
-    assert.ok(overview.range >= 1800 && overview.range <= 10500);
+    assert.equal(overview.altitudeMode, 'RELATIVE_TO_MESH');
+    assert.equal(overview.tilt, 32);
+    assert.equal(overview.heading, 0);
+    assert.ok(overview.range >= 1800 && overview.range <= 11500);
 
     const orbit = compute3DOrbitCamera(SF_EAST, SF_ORIGIN);
+    assert.equal(orbit.altitudeMode, 'RELATIVE_TO_MESH');
     assert.equal(orbit.center.lat, SF_EAST.lat);
     assert.equal(orbit.center.lng, SF_EAST.lng);
-    assert.equal(orbit.center.altitude, 0);
-    assert.equal(orbit.range, 420);
-    assert.equal(orbit.tilt, 65);
+    assert.ok(orbit.center.altitude >= 20);
+    assert.equal(orbit.range, 580);
+    assert.equal(orbit.tilt, 55);
     assert.ok(Math.abs(orbit.heading - 90) <= 2);
+    const orbitClearanceM = orbit.center.altitude + orbit.range * Math.cos((orbit.tilt * Math.PI) / 180);
+    assert.ok(orbitClearanceM >= 300, `expected >= 300m vertical clearance, got ${orbitClearanceM}`);
   });
 });

@@ -20,28 +20,15 @@ import type {
   TravelMode,
 } from './types.ts';
 import { buildContextualFollowUps } from './utils/agentLogic.ts';
+import { isValidGooglePlaceId } from './utils/mapsSync.ts';
 import { rankSpecialists } from './utils/ranking.ts';
-
-function isUsableMapsApiKey(value: string | undefined | null): value is string {
-  if (typeof value !== 'string') return false;
-  const trimmed = value.trim();
-  if (!trimmed || /\s/.test(trimmed)) return false;
-  if (/^(?:MY_|YOUR_|PLACEHOLDER|REPLACE_|ENTER_)/i.test(trimmed)) return false;
-  return true;
-}
+import { isUsableApiKey } from './utils/sanitize.ts';
 
 const RAW_INITIAL_MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
-const INITIAL_MAPS_KEY = isUsableMapsApiKey(RAW_INITIAL_MAPS_KEY) ? RAW_INITIAL_MAPS_KEY : '';
+const INITIAL_MAPS_KEY = isUsableApiKey(RAW_INITIAL_MAPS_KEY) ? RAW_INITIAL_MAPS_KEY : '';
 
 function makeTurnId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function estimateMobileSheetPixels(snap: MobileSheetSnap, hasSelection: boolean): number {
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 760;
-  if (snap === 'peek') return hasSelection ? 148 : 96;
-  if (snap === 'full') return Math.round(vh * 0.86);
-  return Math.round(vh * 0.5);
 }
 
 export default function App() {
@@ -94,7 +81,7 @@ export default function App() {
     fetch('/api/config')
       .then((r) => r.json())
       .then((data: { mapsApiKey?: string }) => {
-        if (active && isUsableMapsApiKey(data.mapsApiKey)) {
+        if (active && isUsableApiKey(data.mapsApiKey)) {
           setMapsApiKey(data.mapsApiKey.trim());
         }
       })
@@ -112,11 +99,6 @@ export default function App() {
   const rankedSpecialists = useMemo(
     () => rankSpecialists(rawSpecialists, sortMode),
     [rawSpecialists, sortMode]
-  );
-
-  const mobileBottomInsetPx = useMemo(
-    () => estimateMobileSheetPixels(mobileSnap, Boolean(selectedId)),
-    [mobileSnap, selectedId]
   );
 
   const runAgentRequest = useCallback(
@@ -244,8 +226,14 @@ export default function App() {
 
         if (data.focusSpecialistId) {
           setSelectedId(data.focusSpecialistId);
-        } else if (data.action === 'search') {
-          setSelectedId(nextSpecialists[0]?.id ?? null);
+        } else if (
+          data.action === 'search' ||
+          data.action === 'sort_change' ||
+          data.action === 'filter_open' ||
+          data.action === 'compare'
+        ) {
+          // Keep orthogonal top-down overview showing all results + starting location on first return
+          setSelectedId(null);
         }
 
         setTurns((prev) => [
@@ -293,7 +281,7 @@ export default function App() {
         ]);
       } else if (result.specialists) {
         setRawSpecialists(result.specialists);
-        setSelectedId(result.specialists[0]?.id ?? null);
+        setSelectedId(null);
         const nextIdSet = new Set(result.specialists.map((s) => s.id));
         setSyncedIds((prev) => prev.filter((id) => nextIdSet.has(id)));
         const top = result.specialists[0];
@@ -388,6 +376,9 @@ export default function App() {
               role: 'assistant',
               text: '',
               error: data.error || 'Could not locate that address.',
+              genUiBlock: !origin
+                ? { type: 'location_prompt', pendingSpecialty: activeSpecialty }
+                : undefined,
             },
           ]);
           setIsLoading(false);
@@ -452,7 +443,7 @@ export default function App() {
         setIsLoading(false);
       }
     },
-    [activeSpecialty, travelMode, runAgentRequest]
+    [origin, activeSpecialty, travelMode, runAgentRequest]
   );
 
   const handleUseGps = useCallback(() => {
@@ -631,23 +622,34 @@ export default function App() {
   }, []);
 
   const handleRequestPlaceDetails = useCallback(async (placeId: string) => {
-    if (!placeId || detailsFetchedRef.current.has(placeId)) return;
+    if (!isValidGooglePlaceId(placeId) || detailsFetchedRef.current.has(placeId)) return;
+    const mySeq = requestSeqRef.current;
     detailsFetchedRef.current.add(placeId);
     setLoadingDetailsId(placeId);
     try {
       const res = await fetch(`/api/place-details?placeId=${encodeURIComponent(placeId)}`);
+      if (mySeq !== requestSeqRef.current) return;
       if (res.status === 429) {
         setQuotaExceeded(true);
+        detailsFetchedRef.current.delete(placeId);
         return;
       }
       let details: PlaceDetailsInsightsResponse | null = null;
+      let fetchSucceeded = false;
       if (res.ok) {
         const parsed = (await res.json()) as PlaceDetailsInsightsResponse;
+        if (mySeq !== requestSeqRef.current) return;
         if (parsed.quotaExceeded) {
           setQuotaExceeded(true);
+          detailsFetchedRef.current.delete(placeId);
           return;
         }
-        if (!parsed.error) details = parsed;
+        if (!parsed.error) {
+          details = parsed;
+          if (!parsed.needsClientDetailsFallback) {
+            fetchSucceeded = true;
+          }
+        }
       }
 
       let reviews = details?.reviews ?? [];
@@ -657,6 +659,7 @@ export default function App() {
       // If REST Place Details did not return reviews (e.g. key restriction), try Maps JS Place.fetchFields
       if (
         reviews.length === 0 &&
+        isValidGooglePlaceId(placeId) &&
         typeof window !== 'undefined' &&
         window.google?.maps?.importLibrary
       ) {
@@ -669,6 +672,8 @@ export default function App() {
             await place.fetchFields({
               fields: ['reviews', 'editorialSummary', 'regularOpeningHours'],
             });
+            if (mySeq !== requestSeqRef.current) return;
+            fetchSucceeded = true;
             const rawReviews = (place as unknown as {
               reviews?: Array<{
                 authorAttribution?: { displayName?: string; uri?: string };
@@ -706,6 +711,13 @@ export default function App() {
         } catch {
           // Best-effort client hydration; Places REST fields remain intact
         }
+      }
+
+      if (mySeq !== requestSeqRef.current) return;
+
+      if (!fetchSucceeded) {
+        detailsFetchedRef.current.delete(placeId);
+        return;
       }
 
       setRawSpecialists((prev) =>
@@ -813,11 +825,11 @@ export default function App() {
         </div>
       )}
 
-      {/* Full-Bleed Map Canvas + Floating Rail (Desktop) / Snap Bottom Sheet (Mobile) */}
+      {/* Docked Rail (Desktop) / Stacked Sheet (Mobile) + Unobstructed Map Canvas (never covers Google logo) */}
       <main
         id="main-content"
         tabIndex={-1}
-        className="relative flex-1 min-h-0 overflow-clip focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
+        className="relative flex flex-col lg:flex-row flex-1 min-h-0 overflow-clip focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
       >
         {configLoaded && mapsApiKey ? (
           <APIProvider
@@ -831,28 +843,6 @@ export default function App() {
               pendingFallback={pendingClientFallback}
               onResolved={handleClientFallbackResolved}
             />
-
-            <div className="absolute inset-0">
-              <SpecialistMap
-                origin={origin}
-                specialists={rankedSpecialists}
-                selectedId={selectedId}
-                hoveredId={hoveredId}
-                syncedIds={syncedIds}
-                travelMode={travelMode}
-                mapViewMode={mapViewMode}
-                camera3DView={camera3DView}
-                sidebarOpen={sidebarOpen}
-                mobileBottomInsetPx={mobileBottomInsetPx}
-                resolvedTheme={resolvedTheme}
-                onToggleTheme={toggleTheme}
-                onChangeCamera3DView={setCamera3DView}
-                onSelectSpecialist={handleSelectSpecialistFromMap}
-                onChangeTravelMode={handleChangeTravelMode}
-                onChangeMapViewMode={handleChangeMapViewMode}
-                onRouteMetricsUpdate={handleRouteMetricsUpdate}
-              />
-            </div>
 
             <AgentSidebar
               open={sidebarOpen}
@@ -882,6 +872,26 @@ export default function App() {
               onRequestPlaceDetails={handleRequestPlaceDetails}
               onReset={handleReset}
             />
+
+            <div className="order-1 lg:order-2 relative flex-1 min-w-0 min-h-[190px] lg:min-h-0">
+              <SpecialistMap
+                origin={origin}
+                specialists={rankedSpecialists}
+                selectedId={selectedId}
+                hoveredId={hoveredId}
+                syncedIds={syncedIds}
+                travelMode={travelMode}
+                mapViewMode={mapViewMode}
+                camera3DView={camera3DView}
+                resolvedTheme={resolvedTheme}
+                onToggleTheme={toggleTheme}
+                onChangeCamera3DView={setCamera3DView}
+                onSelectSpecialist={handleSelectSpecialistFromMap}
+                onChangeTravelMode={handleChangeTravelMode}
+                onChangeMapViewMode={handleChangeMapViewMode}
+                onRouteMetricsUpdate={handleRouteMetricsUpdate}
+              />
+            </div>
           </APIProvider>
         ) : (
           <div className="flex items-center justify-center w-full h-full bg-[var(--bg)] p-6 text-center">

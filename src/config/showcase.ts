@@ -11,7 +11,8 @@ import type { LatLng, SuggestedPrompt } from '../types.ts';
 export const SHOWCASE_CONFIG = {
   brandName: 'Meridian',
   headline: 'Find the right specialist nearby.',
-  composerPlaceholder: 'Dentist in SF, dermatologist in NYC...',
+  composerPlaceholder: 'Enter an address, or try "dentist in SF"...',
+  originReadyPlaceholder: 'Dentist, dermatologist, optometrist...',
   followUpPlaceholder: 'Compare, open now, hours, walking...',
   defaultCenter: { lat: 37.7749, lng: -122.4194 } satisfies LatLng,
   defaultZoom: 12.5,
@@ -115,9 +116,12 @@ export const SHOWCASE_CONFIG = {
   searchRadiusMeters: 14_000,
   maxResults: 10,
   /**
-   * Required Google Maps Platform usage attribution ID.
+   * Required Google Maps Platform usage attribution IDs.
    */
-  attributionIds: ['gmp_mcp_codeassist_v1_aistudio'] as const,
+  attributionIds: [
+    'gmp_mcp_codeassist_v1_aistudio',
+    'gmp_git_agentskills_v1',
+  ] as const,
   primarySolutionId: 'gmp_mcp_codeassist_v1_aistudio',
   /**
    * Short, high-signal starter queries (show, don't tell).

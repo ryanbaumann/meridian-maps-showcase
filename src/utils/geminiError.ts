@@ -67,12 +67,34 @@ export function isInvalidApiKeyError(err: unknown): boolean {
 }
 
 /**
+ * Returns true for client-side 400 INVALID_ARGUMENT errors (such as unsupported
+ * tool combinations) that are not invalid-API-key failures.
+ */
+export function isInvalidArgumentError(err: unknown): boolean {
+  if (isInvalidApiKeyError(err)) return false;
+  const status = extractStatusCode(err);
+  const text = extractErrorText(err);
+  return status === 400 || /\bINVALID_ARGUMENT\b/i.test(text);
+}
+
+/**
  * Returns true when an error from the primary model (`gemini-4-hydrogen`) warrants
  * falling back to `gemini-3.8-flash` (e.g. quota, rate limit, 404/unavailable, 5xx,
- * or model-gated 403). Only skips fallback when the API key itself is invalid.
+ * or model-gated 403). Skips fallback on invalid API key errors and 400 schema errors.
  */
 export function shouldFallbackFromPrimaryModel(err: unknown): boolean {
-  return !isInvalidApiKeyError(err);
+  return !isInvalidApiKeyError(err) && !isInvalidArgumentError(err);
+}
+
+/**
+ * Returns true when the primary model should be placed into temporary cooldown
+ * (model unavailable/404, model-gated 403, or hard quota exhaustion).
+ * Excludes 400 tool-schema errors and transient 5xx hiccups.
+ */
+export function shouldCooldownPrimaryModel(err: unknown): boolean {
+  if (isInvalidApiKeyError(err) || isInvalidArgumentError(err)) return false;
+  const status = extractStatusCode(err);
+  return status === 404 || status === 403 || isHardQuotaExhausted(err);
 }
 
 export function isHardQuotaExhausted(err: unknown): boolean {
@@ -88,6 +110,10 @@ export function extractRetryDelayMs(err: unknown, maxMs = 2500): number | null {
   const seconds = Number(match[1]);
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
   return Math.min(Math.round(seconds * 1000), maxMs);
+}
+
+export function formatGeminiCooldownNotice(): string {
+  return 'Gemini AI summaries are temporarily paused after hitting API quota — showing live Google Places rankings, hours, and travel times below.';
 }
 
 export function formatGeminiUserNotice(err: unknown): string {

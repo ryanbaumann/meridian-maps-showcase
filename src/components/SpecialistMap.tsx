@@ -57,8 +57,6 @@ interface SpecialistMapProps {
   travelMode: TravelMode;
   mapViewMode: MapViewMode;
   camera3DView: Camera3DView;
-  sidebarOpen: boolean;
-  mobileBottomInsetPx: number;
   resolvedTheme: ResolvedTheme;
   onToggleTheme: () => void;
   onChangeCamera3DView: (view: Camera3DView) => void;
@@ -252,8 +250,6 @@ export function SpecialistMap({
   travelMode,
   mapViewMode,
   camera3DView,
-  sidebarOpen,
-  mobileBottomInsetPx,
   resolvedTheme,
   onToggleTheme,
   onChangeCamera3DView,
@@ -264,20 +260,48 @@ export function SpecialistMap({
 }: SpecialistMapProps) {
   const isLoaded = useApiIsLoaded();
   const loadingStatus = useApiLoadingStatus();
+  const stageRef = useRef<HTMLDivElement | null>(null);
 
   const [recenterSignal, setRecenterSignal] = useState(0);
-  const [vectorTilted, setVectorTilted] = useState(true);
-  const [viewport, setViewport] = useState(() => ({
+  // Keep main Vector view strictly orthogonal (tilt: 0, heading: 0) until user opts into Tilt
+  const [vectorTilted, setVectorTilted] = useState(false);
+  const [stageSize, setStageSize] = useState(() => ({
     width: typeof window !== 'undefined' ? window.innerWidth : 1280,
     height: typeof window !== 'undefined' ? window.innerHeight : 800,
+    viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1280,
   }));
 
   useEffect(() => {
-    const onResize = () => {
-      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    const el = stageRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      const vw = typeof window !== 'undefined' ? window.innerWidth : Math.round(rect.width);
+      if (rect.width > 0 && rect.height > 0) {
+        setStageSize((prev) =>
+          Math.abs(prev.width - rect.width) < 1 &&
+          Math.abs(prev.height - rect.height) < 1 &&
+          prev.viewportWidth === vw
+            ? prev
+            : { width: Math.round(rect.width), height: Math.round(rect.height), viewportWidth: vw }
+        );
+      }
     };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+
+    updateSize();
+    window.addEventListener('resize', updateSize);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateSize);
+      ro.observe(el);
+      return () => {
+        ro.disconnect();
+        window.removeEventListener('resize', updateSize);
+      };
+    }
+
+    return () => window.removeEventListener('resize', updateSize);
   }, []);
 
   const selectedSpecialist =
@@ -291,26 +315,26 @@ export function SpecialistMap({
     onMetrics: onRouteMetricsUpdate,
   });
 
+  // Map container sits cleanly beside desktop rail and above mobile sheet (zero Google logo overlap)
   const framing: ViewportFraming = useMemo(() => {
-    const isDesktop = viewport.width >= 1024;
+    const isDesktop = stageSize.viewportWidth >= 1024;
     return {
-      widthPx: viewport.width,
-      heightPx: viewport.height,
-      leftInsetPx: isDesktop && sidebarOpen ? 448 : 0,
-      bottomInsetPx: isDesktop ? 64 : mobileBottomInsetPx,
+      widthPx: stageSize.width,
+      heightPx: stageSize.height,
+      leftInsetPx: 0,
+      bottomInsetPx: isDesktop && selectedSpecialist ? 92 : 36,
       topInsetPx: 68,
     };
-  }, [viewport.width, viewport.height, sidebarOpen, mobileBottomInsetPx]);
+  }, [stageSize.width, stageSize.height, stageSize.viewportWidth, selectedSpecialist]);
 
   const pointsList = useMemo(
-    () => specialists.slice(0, 8).map((s) => s.location),
+    () => specialists.map((s) => s.location),
     [specialists]
   );
 
   const pointsKey = useMemo(
     () =>
       specialists
-        .slice(0, 8)
         .map((s) => `${s.id}:${s.location.lat.toFixed(5)},${s.location.lng.toFixed(5)}`)
         .join('|'),
     [specialists]
@@ -352,6 +376,7 @@ export function SpecialistMap({
 
   return (
     <div
+      ref={stageRef}
       className="relative w-full h-full bg-[var(--bg)] overflow-clip"
       data-testid="map-stage"
       data-map-view={mapViewMode}
@@ -563,6 +588,18 @@ export function SpecialistMap({
         {/* Camera Actions Row (drops cleanly below on < sm; inline on sm+) */}
         {(origin || specialists.length > 0) && (
           <div className="flex items-center gap-1.5">
+            {mapViewMode === 'vector' && selectedSpecialist && specialists.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onSelectSpecialist(null)}
+                aria-label="Show all results and starting location"
+                title="Show all results"
+                className="inline-flex items-center justify-center min-h-[44px] sm:min-h-[38px] px-3 sm:px-2.5 text-xs font-medium rounded-xl border shadow-sm bg-[var(--surface)]/95 text-[var(--ink)] border-[var(--line)] hover:border-[var(--accent)] transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+              >
+                All
+              </button>
+            )}
+
             {mapViewMode === 'vector' && selectedSpecialist && (
               <button
                 type="button"
@@ -654,10 +691,10 @@ export function SpecialistMap({
         )}
       </div>
 
-      {/* Desktop Bottom-Right Active Route Chip */}
+      {/* Desktop Bottom-Right Active Route Chip (lifted above Google Maps attribution bar) */}
       {selectedSpecialist && (
         <div
-          className="hidden lg:flex absolute bottom-5 right-5 z-20 items-center gap-3 px-3.5 py-2.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm max-w-md"
+          className="hidden lg:flex absolute bottom-8 right-4 z-20 items-center gap-3 px-3.5 py-2.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm max-w-md"
           data-testid="active-route-bar"
         >
           <div className="min-w-0">

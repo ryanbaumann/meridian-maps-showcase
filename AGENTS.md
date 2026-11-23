@@ -36,23 +36,24 @@ Read these files first when adapting this showcase to a new local-discovery doma
 
 - **Modern SDKs only**: Use `@vis.gl/react-google-maps`, `AdvancedMarker`, `Place`, `Route.computeRoutes()`, `Map3DElement`, `Model3DInteractiveElement`, `Marker3DInteractiveElement`, and `Polyline3DElement`.
 - **Server proxy boundary**: Call Maps REST endpoints only inside `server/mapsApi.ts`. Use `useMapsLibrary(...)` inside `src/`.
-- **Vector map settings**: Keep `mapId="DEMO_MAP_ID"` and `renderingType={RenderingType.VECTOR}` on `<Map>` for markers, tilt, and heading.
+- **Vector map settings**: Keep `mapId="DEMO_MAP_ID"` and `renderingType={RenderingType.VECTOR}` on `<Map>` for markers, tilt, and heading. Default the main view to orthogonal top-down (`tilt: 0`, `heading: 0`) framing all results and the user origin on first return.
 - **Smooth Vector camera**: Call `map.moveCamera` (never `fitBounds`) so tilt and heading animate smoothly. Cancel tweens on drag, wheel, or touch.
 - **Heading-aware framing**: Rotate screen inset offsets by camera heading inside `src/utils/camera.ts`.
-- **3D camera presets**: Support `corridor` (`Route`), `street` (`Street`), `overview` (`Aerial`), `orbit` (`Orbit`), and `free` (manual user control). Set `defaultUIHidden: true` and pass `internalUsageAttributionIds` in the `Map3DElement` constructor. Pass `camera`, `durationMillis`, and `repeatCount` to `flyCameraAround()`. Stop animations and switch to `free` on pointer or wheel input.
+- **3D camera presets**: Support `corridor` (`Route`), `street` (`Street`), `overview` (`Aerial`), `orbit` (`Orbit`), and `free` (manual user control). Set `defaultUIHidden: true`, `minTilt: 0`, `maxTilt: 68`, and `internalUsageAttributionIds` in the `Map3DElement` constructor. Use `altitudeMode: 'RELATIVE_TO_MESH'` with rooftop altitude clearance and exact subject centering so zoom, orbit, and pitch never clip terrain or buildings. Pass `camera`, `durationMillis`, and `repeatCount` to `flyCameraAround()`. Stop animations and switch to `free` on pointer or wheel input.
 - **Custom 3D models**: Load extension-free glTF 2.0 `.glb` files via `Model3DInteractiveElement` (`Model3DElement` fallback) with `altitudeMode: 'RELATIVE_TO_MESH'` and `orientation: { heading, tilt: 270, roll: 0 }` (maps glTF `+Y` up to Maps 3D `+Z` up).
 - **Shared routes**: Keep route computation in `src/hooks/useActiveRoute.ts` so Vector and 3D maps share one street-following polyline.
 - **A2UI cards**: Wrap `<a2ui-surface>` inside `<maui-providers>`. Set `--gmp-card-border: none`, `colorScheme`, and `--color-scheme` on the host. Switch to `vertical` orientation below `350px` width so photos remain visible.
-- **Attribution and quota**: Keep both `SHOWCASE_CONFIG.attributionIds` values on `<Map>`, `Map3DElement`, and `<maui-providers>`. Keep explicit `Google Maps` text (`translate="no"`) beside grounding links. Keep the `gmp-quota-exceeded` banner in `src/App.tsx`.
+- **Attribution, logo clearance, and quota**: Keep both `SHOWCASE_CONFIG.attributionIds` values on `<Map>`, `Map3DElement`, and `<maui-providers>`. Never cover the bottom-left Google logo or bottom-right map attribution (dock the desktop sidebar beside the map and stack the mobile sheet below the map). Keep explicit `Google Maps` text (`translate="no"`) beside grounding links. Keep the `gmp-quota-exceeded` banner in `src/App.tsx`.
 - **ToS rules**: Fetch all place facts, coordinates, and reviews from live APIs. Set `Cache-Control: no-store` on `/api/place-photo` and `/api/place-details`.
 
 ## UI, Styling, and Modern Web Contract
 
+- **Location-first onboarding**: Anchor the initial empty state on entering the user's current location (GPS) or starting address before showing example searches.
 - **Show, don't tell**: Keep agent replies to 1–2 sentences (under 40 words). Let the map, route, 3D scene, and A2UI cards show details.
 - **Semantic tokens and themes**: Define colors in `src/index.css` using `:root` tokens and `@custom-variant dark`. Maintain `>= 4.5:1` text contrast, `>= 3:1` control border contrast (`--control-line`), `@media (prefers-contrast: more)`, and `@media (forced-colors: active)` pressed borders.
 - **Browser baseline**: Gate Newly Available CSS (`light-dark()`, `scrollbar-color`, `scrollbar-width`, `background-clip: border-area`) behind `@supports` or media-query fallbacks. Keep vendor `<progress>` pseudo-elements in separate CSS rule blocks. Honor `prefers-reduced-motion` without jarring global `0.01ms` resets.
 - **Accessibility and forms**: Keep one visible `<h1>`, semantic `<search>` and `<ul role="list">` landmarks, unique `sr-only` context on repeated links, `1rem` mobile input text (`text-base sm:text-sm`) to prevent iOS zoom, and `>= 44×44px` mobile touch targets.
-- **Security hygiene**: Sanitize all external URLs via `src/utils/url.ts` (`safeExternalUrl`, `safeTelHref`). Avoid `innerHTML`; use `replaceChildren()` or React JSX. Keep security response headers in `server.ts`.
+- **Security hygiene**: Sanitize client specialist payloads via `src/utils/sanitize.ts`, external URLs via `src/utils/url.ts` (`safeExternalUrl`, `safeTelHref`, `isAllowedGooglePhotoRedirectUrl`), and API keys via `isUsableApiKey`. Avoid `innerHTML`; use `replaceChildren()` or React JSX. Keep security response headers in `server.ts`.
 - **Mobile layout**: Size the root shell to `h-[100dvh] w-full`. Collapse the mobile sheet to `peek` when a user taps a map pin or switches to 3D.
 
 ## AI Studio Invariants

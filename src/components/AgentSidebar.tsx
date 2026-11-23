@@ -74,9 +74,9 @@ interface AgentSidebarProps {
 }
 
 const MOBILE_SNAP_HEIGHT_CLASS: Record<MobileSheetSnap, string> = {
-  peek: 'h-auto max-h-[192px]',
-  half: 'h-[50dvh]',
-  full: 'h-[86dvh]',
+  peek: 'h-auto max-h-[calc(100%-190px)]',
+  half: 'h-[min(48dvh,calc(100%-190px))]',
+  full: 'h-[min(74dvh,calc(100%-190px))]',
 };
 
 export function AgentSidebar({
@@ -108,9 +108,11 @@ export function AgentSidebar({
   onReset,
 }: AgentSidebarProps) {
   const locationInputId = useId();
+  const welcomeLocationId = useId();
   const [messageInput, setMessageInput] = useState('');
   const [editingLocation, setEditingLocation] = useState(false);
   const [locationDraft, setLocationDraft] = useState('');
+  const [welcomeLocationDraft, setWelcomeLocationDraft] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
 
   const threadEndRef = useRef<HTMLDivElement | null>(null);
@@ -171,6 +173,15 @@ export function AgentSidebar({
     onSetLocationText(trimmed);
   };
 
+  const handleWelcomeLocationSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = welcomeLocationDraft.trim();
+    if (!trimmed || isLoading) return;
+    setWelcomeLocationDraft('');
+    onChangeMobileSnap('half');
+    onSetLocationText(trimmed);
+  };
+
   const handleAskAboutClinic = (clinic: Specialist) => {
     if (isLoading) return;
     onChangeMobileSnap('half');
@@ -215,42 +226,42 @@ export function AgentSidebar({
       ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${selectedSpecialist.location.lat},${selectedSpecialist.location.lng}&travelmode=${toGoogleMapsUrlTravelMode(travelMode)}`
       : safeExternalUrl(selectedSpecialist?.googleMapsUri));
 
-  // Desktop collapsed floating pill (retains accessible H1 for screen reader outline)
-  if (!open) {
-    return (
-      <div className="hidden lg:block absolute top-4 left-4 z-30">
-        <h1 className="sr-only">{SHOWCASE_CONFIG.brandName}</h1>
-        <button
-          type="button"
-          onClick={onToggleOpen}
-          aria-label={`Open ${SHOWCASE_CONFIG.brandName} panel`}
-          className="inline-flex items-center gap-2 h-10 px-3.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm text-sm font-semibold text-[var(--ink)] hover:border-[var(--accent)] active:scale-[0.98] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
-        >
-          <span className="font-display tracking-tight">{SHOWCASE_CONFIG.brandName}</span>
-          {specialists.length > 0 && (
-            <span className="text-xs font-normal text-[var(--muted)] tabular-nums">
-              · {specialists.length}
-            </span>
-          )}
-          <ChevronRight className="w-4 h-4 text-[var(--muted)]" aria-hidden="true" />
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <aside
-      aria-label={`${SHOWCASE_CONFIG.brandName} search and cards`}
-      className={`
-        fixed inset-x-0 bottom-0 z-30 flex flex-col
-        bg-[var(--surface)]/97 border-t border-[var(--line)] rounded-t-2xl shadow-lg
-        transition-[height] duration-200 ease-out
-        ${MOBILE_SNAP_HEIGHT_CLASS[mobileSnap]}
-        lg:absolute lg:inset-x-auto lg:top-4 lg:left-4 lg:bottom-4 lg:h-auto lg:max-h-none lg:w-[428px]
-        lg:rounded-2xl lg:border lg:shadow-md
-        overflow-clip
-      `}
-    >
+    <>
+      {/* Desktop collapsed floating pill (retains accessible H1 on desktop while <aside> is lg:hidden) */}
+      {!open && (
+        <div className="hidden lg:block absolute top-4 left-4 z-30">
+          <h1 className="sr-only">{SHOWCASE_CONFIG.brandName}</h1>
+          <button
+            type="button"
+            onClick={onToggleOpen}
+            aria-label={`Open ${SHOWCASE_CONFIG.brandName} panel`}
+            className="inline-flex items-center gap-2 h-10 px-3.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm text-sm font-semibold text-[var(--ink)] hover:border-[var(--accent)] active:scale-[0.98] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+          >
+            <span className="font-display tracking-tight">{SHOWCASE_CONFIG.brandName}</span>
+            {specialists.length > 0 && (
+              <span className="text-xs font-normal text-[var(--muted)] tabular-nums">
+                · {specialists.length}
+              </span>
+            )}
+            <ChevronRight className="w-4 h-4 text-[var(--muted)]" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      <aside
+        aria-label={`${SHOWCASE_CONFIG.brandName} search and cards`}
+        className={`
+          order-2 relative z-30 flex flex-col shrink-0 w-full
+          bg-[var(--surface)] border-t border-[var(--line)] rounded-t-2xl shadow-lg
+          transition-[height] duration-200 ease-out
+          ${MOBILE_SNAP_HEIGHT_CLASS[mobileSnap]}
+          lg:order-1 lg:static lg:h-full lg:max-h-none lg:w-[428px]
+          lg:rounded-none lg:border-t-0 lg:border-r lg:border-[var(--line)] lg:shadow-none
+          ${!open ? 'lg:hidden' : ''}
+          overflow-clip
+        `}
+      >
       {/* Mobile Grab Handle (tap or vertical swipe; pan-x keeps horizontal gestures free) */}
       <div
         className="lg:hidden flex items-center justify-center shrink-0 touch-pan-x"
@@ -463,42 +474,89 @@ export function AgentSidebar({
                     {SHOWCASE_CONFIG.headline}
                   </h2>
                   <p className="text-xs text-[var(--muted)] leading-relaxed">
-                    {SHOWCASE_CONFIG.agent.tagline}
+                    Start with your current location or address so nearby options, live travel times, and routes anchor to where you are.
                   </p>
                 </div>
 
-              <ul role="list" className="space-y-1.5">
-                {SHOWCASE_CONFIG.starters.map((starter) => (
-                  <li key={starter.label}>
+                {/* Primary First-Run Experience: Anchor Starting Location */}
+                {!origin && (
+                  <div
+                    data-testid="welcome-location-anchor"
+                    className="p-3.5 rounded-xl border border-[var(--line)] bg-[var(--surface-subtle)] space-y-3"
+                  >
                     <button
                       type="button"
-                      disabled={isLoading}
-                      onClick={() => onSubmitMessage(starter.prompt)}
-                      className="w-full flex items-center justify-between gap-3 min-h-[44px] px-3.5 py-2.5 text-left text-xs font-medium text-[var(--ink)] bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.99] rounded-xl transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                      onClick={onUseGps}
+                      disabled={isLocatingGps || isLoading}
+                      className="w-full inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 text-xs font-semibold text-[var(--accent-ink)] bg-[var(--accent)] hover:opacity-90 active:scale-[0.99] rounded-lg transition-opacity cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                     >
-                      <span>{starter.label}</span>
-                      <ArrowRight
-                        className="w-3.5 h-3.5 text-[var(--muted)] shrink-0"
-                        aria-hidden="true"
-                      />
+                      <LocateFixed className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span>{isLocatingGps ? 'Locating you...' : 'Use my current location'}</span>
                     </button>
-                  </li>
-                ))}
-              </ul>
 
-              {!origin && (
-                <button
-                  type="button"
-                  onClick={onUseGps}
-                  disabled={isLocatingGps}
-                  className="inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-[36px] text-xs font-medium text-[var(--accent-text)] hover:underline cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
-                >
-                  <LocateFixed className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>{isLocatingGps ? 'Locating...' : 'Use my location'}</span>
-                </button>
-              )}
-            </div>
-          )}
+                    <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                      <span className="h-px flex-1 bg-[var(--line)]" aria-hidden="true" />
+                      <span>or enter an address</span>
+                      <span className="h-px flex-1 bg-[var(--line)]" aria-hidden="true" />
+                    </div>
+
+                    <form onSubmit={handleWelcomeLocationSubmit} className="space-y-1.5">
+                      <label
+                        htmlFor={welcomeLocationId}
+                        className="block text-xs font-semibold text-[var(--ink)]"
+                      >
+                        Starting address, city, or ZIP
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          id={welcomeLocationId}
+                          name="street-address"
+                          type="text"
+                          autoComplete="street-address"
+                          enterKeyHint="go"
+                          required
+                          value={welcomeLocationDraft}
+                          onChange={(e) => setWelcomeLocationDraft(e.target.value)}
+                          placeholder="Street address, city, or ZIP..."
+                          className="flex-1 min-w-0 min-h-[44px] sm:min-h-[38px] px-3 text-base sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--surface)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isLoading || !welcomeLocationDraft.trim()}
+                          className="inline-flex items-center justify-center min-h-[44px] sm:min-h-[38px] px-3 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)] border border-[var(--control-line)] active:scale-[0.98] disabled:opacity-45 rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                        >
+                          Set location
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-[var(--line)]/80 space-y-2">
+                  <p className="text-xs font-medium text-[var(--muted)]">
+                    Or try an example search
+                  </p>
+                  <ul role="list" className="space-y-1.5">
+                    {SHOWCASE_CONFIG.starters.map((starter) => (
+                      <li key={starter.label}>
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => onSubmitMessage(starter.prompt)}
+                          className="w-full flex items-center justify-between gap-3 min-h-[44px] px-3.5 py-2 text-left text-xs font-medium text-[var(--ink)] bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.99] rounded-xl transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                        >
+                          <span>{starter.label}</span>
+                          <ArrowRight
+                            className="w-3.5 h-3.5 text-[var(--muted)] shrink-0"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
 
             {turns.map((turn, idx) => {
               const isLatestTurn = idx === turns.length - 1;
@@ -628,10 +686,11 @@ export function AgentSidebar({
                                 href={rev.href}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="group flex items-start gap-1.5 px-2 py-1 rounded-md text-[11px] leading-snug text-[var(--muted)] hover:text-[var(--ink)] bg-[var(--surface-subtle)]/70 border border-[var(--line)]/70 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                                className="group flex items-start gap-1.5 min-h-[44px] sm:min-h-0 px-2.5 py-2 sm:px-2 sm:py-1 rounded-md text-[11px] leading-snug text-[var(--muted)] hover:text-[var(--ink)] bg-[var(--surface-subtle)]/70 border border-[var(--line)]/70 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                               >
                                 <span className="line-clamp-2 flex-1">
                                   “{rev.text}” — <span className="font-medium text-[var(--ink)]">{rev.placeTitle}</span>
+                                  <span className="sr-only"> (Google Maps review)</span>
                                 </span>
                                 <ExternalLink className="w-2.5 h-2.5 mt-0.5 shrink-0 opacity-70 group-hover:opacity-100" aria-hidden="true" />
                               </a>
@@ -812,9 +871,11 @@ export function AgentSidebar({
                 if (mobileSnap === 'peek') onChangeMobileSnap('half');
               }}
               placeholder={
-                turns.length > 0
+                specialists.length > 0
                   ? SHOWCASE_CONFIG.followUpPlaceholder
-                  : SHOWCASE_CONFIG.composerPlaceholder
+                  : origin
+                    ? SHOWCASE_CONFIG.originReadyPlaceholder
+                    : SHOWCASE_CONFIG.composerPlaceholder
               }
               className="flex-1 min-w-0 bg-transparent text-base sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] focus:outline-none px-1"
             />
@@ -830,6 +891,7 @@ export function AgentSidebar({
           </div>
         </form>
       </search>
-    </aside>
+      </aside>
+    </>
   );
 }

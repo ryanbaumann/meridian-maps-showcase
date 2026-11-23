@@ -38,6 +38,7 @@ interface Map3DElementShape extends HTMLElement {
       range: number;
       tilt: number;
       heading: number;
+      altitudeMode?: string;
     };
     durationMillis?: number;
   }) => void;
@@ -47,6 +48,7 @@ interface Map3DElementShape extends HTMLElement {
       range: number;
       tilt: number;
       heading: number;
+      altitudeMode?: string;
     };
     durationMillis?: number;
     repeatCount?: number;
@@ -116,17 +118,16 @@ export function PhotorealisticMap3D({
     [specialists, selectedId]
   );
 
-  // Stable spatial signature so route-metric updates never restart active flights
+  // Stable spatial signature across all results so route-metric updates never restart active flights
   const pointsKey = useMemo(
     () =>
       specialists
-        .slice(0, 8)
         .map((s) => `${s.id}:${s.location.lat.toFixed(5)},${s.location.lng.toFixed(5)}`)
         .join('|'),
     [specialists]
   );
   const specialistsPointsRef = useRef<LatLng[]>([]);
-  specialistsPointsRef.current = specialists.slice(0, 8).map((s) => s.location);
+  specialistsPointsRef.current = specialists.map((s) => s.location);
 
   const originLat = origin?.lat ?? null;
   const originLng = origin?.lng ?? null;
@@ -156,6 +157,8 @@ export function PhotorealisticMap3D({
         range: initialCamera.range,
         tilt: initialCamera.tilt,
         heading: initialCamera.heading,
+        minTilt: 0,
+        maxTilt: 68,
         mode: maps3dLib.MapMode?.HYBRID ?? 'HYBRID',
         defaultUIHidden: true,
         internalUsageAttributionIds: [...SHOWCASE_CONFIG.attributionIds],
@@ -445,14 +448,31 @@ export function PhotorealisticMap3D({
       // Ignore if idle
     }
 
+    const meshMode =
+      maps3dLib?.AltitudeMode?.RELATIVE_TO_MESH ??
+      maps3dLib?.AltitudeMode?.RELATIVE_TO_GROUND ??
+      'RELATIVE_TO_MESH';
+
     if (camera3DView === 'orbit' && focusedPoint) {
-      const orbitCamera = compute3DOrbitCamera(focusedPoint, originPoint);
+      const baseOrbitCamera = compute3DOrbitCamera(focusedPoint, originPoint);
+      const orbitCamera = { ...baseOrbitCamera, altitudeMode: meshMode };
 
       if (reduced || typeof map3d.flyCameraAround !== 'function') {
-        map3d.center = orbitCamera.center;
-        map3d.range = orbitCamera.range;
-        map3d.tilt = orbitCamera.tilt;
-        map3d.heading = orbitCamera.heading;
+        if (typeof map3d.flyCameraTo === 'function') {
+          try {
+            map3d.flyCameraTo({ endCamera: orbitCamera, durationMillis: 0 });
+          } catch {
+            map3d.center = orbitCamera.center;
+            map3d.range = orbitCamera.range;
+            map3d.tilt = orbitCamera.tilt;
+            map3d.heading = orbitCamera.heading;
+          }
+        } else {
+          map3d.center = orbitCamera.center;
+          map3d.range = orbitCamera.range;
+          map3d.tilt = orbitCamera.tilt;
+          map3d.heading = orbitCamera.heading;
+        }
         onCamera3DViewChangeRef.current('street');
         return;
       }
@@ -510,7 +530,7 @@ export function PhotorealisticMap3D({
     const preset: Exclude<Camera3DView, 'orbit' | 'free'> =
       camera3DView === 'street' || camera3DView === 'overview' ? camera3DView : 'corridor';
 
-    const endCamera = compute3DCameraTarget({
+    const baseEndCamera = compute3DCameraTarget({
       origin: originPoint,
       points: specialistsPointsRef.current,
       focused: focusedPoint,
@@ -518,12 +538,13 @@ export function PhotorealisticMap3D({
       fallbackCenter: SHOWCASE_CONFIG.defaultCenter,
       view: preset,
     });
+    const endCamera = { ...baseEndCamera, altitudeMode: meshMode };
 
-    if (!reduced && typeof map3d.flyCameraTo === 'function') {
+    if (typeof map3d.flyCameraTo === 'function') {
       try {
         map3d.flyCameraTo({
           endCamera,
-          durationMillis: preset === 'street' ? 1400 : 1200,
+          durationMillis: reduced ? 0 : preset === 'street' ? 1400 : 1200,
         });
         return;
       } catch {

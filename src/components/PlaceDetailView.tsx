@@ -195,9 +195,10 @@ export function PlaceDetailView({
                     href={safeExternalUrl(primaryAttribution.uri)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hover:underline"
+                    className="inline-flex items-center min-h-[44px] sm:min-h-0 hover:underline focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
                   >
                     {primaryAttribution.displayName}
+                    <span className="sr-only"> (photo credit for {specialist.name})</span>
                   </a>
                 ) : (
                   primaryAttribution.displayName
@@ -224,6 +225,7 @@ export function PlaceDetailView({
             >
               <Navigation className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Directions</span>
+              <span className="sr-only"> to {specialist.name}</span>
             </a>
           )}
           {phoneHref && (
@@ -233,6 +235,7 @@ export function PlaceDetailView({
             >
               <Phone className="w-3.5 h-3.5 text-[var(--muted)]" aria-hidden="true" />
               <span>{specialist.phoneNumber}</span>
+              <span className="sr-only"> call {specialist.name}</span>
             </a>
           )}
           {websiteHref && (
@@ -244,6 +247,7 @@ export function PlaceDetailView({
             >
               <Globe className="w-3.5 h-3.5 text-[var(--muted)]" aria-hidden="true" />
               <span>Website</span>
+              <span className="sr-only"> for {specialist.name}</span>
             </a>
           )}
           {mapsHref && (
@@ -254,6 +258,7 @@ export function PlaceDetailView({
               className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--ink)] whitespace-nowrap focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded-lg"
             >
               <span translate="no">Google Maps</span>
+              <span className="sr-only"> listing for {specialist.name}</span>
               <ExternalLink className="w-3 h-3" aria-hidden="true" />
             </a>
           )}
@@ -378,10 +383,11 @@ export function PlaceDetailView({
               <button
                 type="button"
                 onClick={() => onAskAboutClinic(specialist)}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
+                className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-[28px] px-1.5 text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
               >
                 <MessageSquare className="w-3 h-3" aria-hidden="true" />
                 <span>Ask agent</span>
+                <span className="sr-only"> about {specialist.name}</span>
               </button>
             )}
           </div>
@@ -412,9 +418,13 @@ export function PlaceDetailView({
                         href={reviewHref}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-text)] hover:underline"
+                        className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-[28px] text-[11px] font-medium text-[var(--accent-text)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
                       >
                         <span>Read on Google Maps</span>
+                        <span className="sr-only">
+                          {' '}
+                          — review by {rev.authorName} for {specialist.name}
+                        </span>
                         <ExternalLink className="w-2.5 h-2.5" aria-hidden="true" />
                       </a>
                     )}
@@ -436,7 +446,7 @@ export function PlaceDetailView({
                   href={mapsHref}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-text)] hover:underline"
+                  className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-[28px] text-xs font-semibold text-[var(--accent-text)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
                 >
                   <span>
                     Read{' '}
@@ -445,6 +455,7 @@ export function PlaceDetailView({
                       : 'reviews'}{' '}
                     on Google Maps
                   </span>
+                  <span className="sr-only"> for {specialist.name}</span>
                   <ExternalLink className="w-3 h-3" aria-hidden="true" />
                 </a>
               )}

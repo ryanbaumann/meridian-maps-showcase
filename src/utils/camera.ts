@@ -13,6 +13,7 @@ export interface Camera3DState {
   range: number;
   tilt: number;
   heading: number;
+  altitudeMode: 'RELATIVE_TO_MESH' | 'RELATIVE_TO_GROUND' | 'ABSOLUTE';
 }
 
 export interface ViewportFraming {
@@ -244,10 +245,16 @@ export function computeVectorCameraTarget(opts: {
   const allPoints = origin ? [origin, ...points] : points;
   if (allPoints.length > 0) {
     const envelope = computePointsEnvelope(allPoints);
+    const cosLat = Math.max(Math.cos(envelope.center.lat * DEG_TO_RAD), 0.2);
+    const latMeters = Math.max(envelope.latSpan * 110_540, 240);
+    const lngMeters = Math.max(envelope.lngSpan * 111_320 * cosLat, 240);
     const zoom =
       allPoints.length === 1
         ? 13.5
-        : zoomForSpanMeters(envelope.spanMeters, envelope.center.lat, minAvail, 11, 15.5);
+        : Math.min(
+            zoomForSpanMeters(lngMeters, envelope.center.lat, availW, 9.5, 15.5),
+            zoomForSpanMeters(latMeters, envelope.center.lat, availH, 9.5, 15.5)
+          );
     return {
       center: offsetCenterForInsets(envelope.center, zoom, framing, 0),
       zoom,
@@ -265,8 +272,12 @@ export function computeVectorCameraTarget(opts: {
 }
 
 /**
- * Computes the ideal Photorealistic 3D Map camera (`center`, `range`, `tilt`, `heading`)
- * across `corridor`, `street`, and `overview` presets with heading-aware inset shifting.
+ * Computes the ideal Photorealistic 3D Map camera (`center`, `range`, `tilt`, `heading`,
+ * `altitudeMode`) across `corridor`, `street`, and `overview` presets.
+ *
+ * Uses `RELATIVE_TO_MESH` with rooftop altitude clearance and exact subject centering
+ * (no artificial horizontal offset) so zooming, orbiting, panning, and pitching pivot
+ * cleanly around the object without colliding with surrounding terrain or buildings.
  */
 export function compute3DCameraTarget(opts: {
   origin: LatLng | null;
@@ -276,26 +287,19 @@ export function compute3DCameraTarget(opts: {
   fallbackCenter: LatLng;
   view?: Exclude<Camera3DView, 'orbit' | 'free'>;
 }): Camera3DState {
-  const { origin, points, focused, framing, fallbackCenter, view = 'corridor' } = opts;
-  const isDesktop = framing.widthPx >= 1024;
-
-  const shift3DCenter = (base: LatLng, range: number, heading: number): LatLng => {
-    const shiftLeftMeters = isDesktop && framing.leftInsetPx > 0 ? range * 0.14 : 0;
-    const shiftDownMeters = !isDesktop && framing.bottomInsetPx > 140 ? range * 0.11 : 0;
-    return applyRotatedScreenShift(base, shiftLeftMeters, shiftDownMeters, heading);
-  };
+  const { origin, points, focused, fallbackCenter, view = 'corridor' } = opts;
 
   if (view === 'street') {
     const subject = focused ?? origin ?? points[0] ?? fallbackCenter;
     const heading =
       focused && origin ? Math.round(computeBearing(origin, focused)) : 24;
-    const range = 340;
-    const shifted = shift3DCenter(subject, range, heading);
+    // 22m above building mesh + 520m * cos(58°) ≈ 297m vertical clearance over rooftops
     return {
-      center: { lat: shifted.lat, lng: shifted.lng, altitude: 0 },
-      range,
-      tilt: 74,
+      center: { lat: subject.lat, lng: subject.lng, altitude: 22 },
+      range: 520,
+      tilt: 58,
       heading,
+      altitudeMode: 'RELATIVE_TO_MESH',
     };
   }
 
@@ -308,43 +312,40 @@ export function compute3DCameraTarget(opts: {
     const range =
       allPoints.length <= 1
         ? 2400
-        : clamp(Math.round(env.spanMeters * 1.65), 1800, 10500);
-    const heading = 12;
-    const shifted = shift3DCenter(env.center, range, heading);
+        : clamp(Math.round(env.spanMeters * 1.8), 1800, 11500);
     return {
-      center: { lat: shifted.lat, lng: shifted.lng, altitude: 0 },
+      center: { lat: env.center.lat, lng: env.center.lng, altitude: 12 },
       range,
-      tilt: 38,
-      heading,
+      tilt: 32,
+      heading: 0,
+      altitudeMode: 'RELATIVE_TO_MESH',
     };
   }
 
   if (focused && origin) {
     const dist = haversineMeters(origin, focused);
     const heading = Math.round(computeBearing(origin, focused));
-    const range = clamp(Math.round(dist * 1.45), 950, 7200);
+    const range = clamp(Math.round(dist * 1.6), 1200, 7800);
     const mid: LatLng = {
-      lat: origin.lat * 0.36 + focused.lat * 0.64,
-      lng: origin.lng * 0.36 + focused.lng * 0.64,
+      lat: (origin.lat + focused.lat) / 2,
+      lng: (origin.lng + focused.lng) / 2,
     };
-    const shifted = shift3DCenter(mid, range, heading);
     return {
-      center: { lat: shifted.lat, lng: shifted.lng, altitude: 0 },
+      center: { lat: mid.lat, lng: mid.lng, altitude: 16 },
       range,
-      tilt: 62,
+      tilt: 52,
       heading,
+      altitudeMode: 'RELATIVE_TO_MESH',
     };
   }
 
   if (focused) {
-    const range = 820;
-    const heading = 22;
-    const shifted = shift3DCenter(focused, range, heading);
     return {
-      center: { lat: shifted.lat, lng: shifted.lng, altitude: 0 },
-      range,
-      tilt: 64,
-      heading,
+      center: { lat: focused.lat, lng: focused.lng, altitude: 22 },
+      range: 760,
+      tilt: 54,
+      heading: 22,
+      altitudeMode: 'RELATIVE_TO_MESH',
     };
   }
 
@@ -354,29 +355,29 @@ export function compute3DCameraTarget(opts: {
     const range =
       allPoints.length === 1
         ? 2200
-        : clamp(Math.round(env.spanMeters * 1.55), 1600, 9500);
-    const heading = 12;
-    const shifted = shift3DCenter(env.center, range, heading);
+        : clamp(Math.round(env.spanMeters * 1.75), 1800, 10500);
     return {
-      center: { lat: shifted.lat, lng: shifted.lng, altitude: 0 },
+      center: { lat: env.center.lat, lng: env.center.lng, altitude: 14 },
       range,
-      tilt: 54,
-      heading,
+      tilt: 45,
+      heading: 0,
+      altitudeMode: 'RELATIVE_TO_MESH',
     };
   }
 
-  const heading = 15;
-  const shifted = shift3DCenter(fallbackCenter, 2600, heading);
   return {
-    center: { lat: shifted.lat, lng: shifted.lng, altitude: 0 },
+    center: { lat: fallbackCenter.lat, lng: fallbackCenter.lng, altitude: 16 },
     range: 2600,
-    tilt: 58,
-    heading,
+    tilt: 48,
+    heading: 0,
+    altitudeMode: 'RELATIVE_TO_MESH',
   };
 }
 
 /**
- * Computes a tight close-up camera centered on a focused place for `flyCameraAround`.
+ * Computes a building-safe close-up camera dead-centered on a focused place for `flyCameraAround`.
+ * Uses `RELATIVE_TO_MESH` with 22m rooftop clearance and 580m range at 55° tilt (~355m camera height)
+ * so 360° orbits stay centered on the object without clipping surrounding structures.
  */
 export function compute3DOrbitCamera(
   focused: LatLng,
@@ -384,10 +385,11 @@ export function compute3DOrbitCamera(
 ): Camera3DState {
   const heading = origin ? Math.round(computeBearing(origin, focused)) : 20;
   return {
-    center: { lat: focused.lat, lng: focused.lng, altitude: 0 },
-    range: 420,
-    tilt: 65,
+    center: { lat: focused.lat, lng: focused.lng, altitude: 22 },
+    range: 580,
+    tilt: 55,
     heading,
+    altitudeMode: 'RELATIVE_TO_MESH',
   };
 }
 

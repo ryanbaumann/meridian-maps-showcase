@@ -16,9 +16,12 @@ import {
   classifyGeminiError,
   extractRetryDelayMs,
   isHardQuotaExhausted,
+  isInvalidArgumentError,
+  shouldCooldownPrimaryModel,
   shouldFallbackFromPrimaryModel,
 } from '../src/utils/geminiError.ts';
 import { formatDistance, formatTravelTime } from '../src/utils/ranking.ts';
+import { cleanBoundedText, isUsableApiKey } from '../src/utils/sanitize.ts';
 
 const HYDROGEN_MODEL = 'gemini-4-hydrogen';
 const FALLBACK_FLASH_MODEL = 'gemini-3.8-flash';
@@ -26,6 +29,7 @@ const LOW_THINKING_CONFIG = { thinkingLevel: ThinkingLevel.LOW } as const;
 const QUOTA_COOLDOWN_MS = 5 * 60_000;
 
 let mapsGroundingCooldownUntil = 0;
+let geminiApiCooldownUntil = 0;
 let hydrogenModelCooldownUntil = 0;
 
 function sleep(ms: number): Promise<void> {
@@ -40,9 +44,17 @@ export function markMapsGroundingQuotaCooldown(): void {
   mapsGroundingCooldownUntil = Date.now() + QUOTA_COOLDOWN_MS;
 }
 
+export function isGeminiApiReady(): boolean {
+  return Date.now() >= geminiApiCooldownUntil;
+}
+
+export function markGeminiQuotaCooldown(): void {
+  geminiApiCooldownUntil = Date.now() + QUOTA_COOLDOWN_MS;
+}
+
 export function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return null;
+  if (!isUsableApiKey(apiKey)) return null;
   return new GoogleGenAI({
     apiKey,
     httpOptions: {
@@ -99,7 +111,9 @@ async function generateWithFallback(
       );
     } catch (err) {
       if (shouldFallbackFromPrimaryModel(err)) {
-        hydrogenModelCooldownUntil = Date.now() + QUOTA_COOLDOWN_MS;
+        if (shouldCooldownPrimaryModel(err)) {
+          hydrogenModelCooldownUntil = Date.now() + QUOTA_COOLDOWN_MS;
+        }
         return await callGeminiWithRetry(() =>
           ai.models.generateContent({
             model: FALLBACK_FLASH_MODEL,
@@ -122,22 +136,19 @@ async function generateWithFallback(
 }
 
 function buildMapsToolConfig(
-  coords?: LatLng | null,
-  includeServerSideToolInvocations = false
+  coords?: LatLng | null
 ): Record<string, unknown> | undefined {
-  const toolConfig: Record<string, unknown> = {};
-  if (includeServerSideToolInvocations) {
-    toolConfig.includeServerSideToolInvocations = true;
+  if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
+    return undefined;
   }
-  if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
-    toolConfig.retrievalConfig = {
+  return {
+    retrievalConfig: {
       latLng: {
         latitude: coords.lat,
         longitude: coords.lng,
       },
-    };
-  }
-  return Object.keys(toolConfig).length > 0 ? toolConfig : undefined;
+    },
+  };
 }
 
 function resolveGroundingCoords(
@@ -177,15 +188,17 @@ function formatSpecialistsContext(
   return specialists
     .slice(0, 6)
     .map((s, idx) => {
-      const todayHours = getTodayHoursSummary(s.weekdayDescriptions);
+      const safeName = cleanBoundedText(s.name, 120) || 'Specialist';
+      const safeSpecialty = cleanBoundedText(s.specialty, 80) || 'Specialist';
+      const todayHours = cleanBoundedText(getTodayHoursSummary(s.weekdayDescriptions), 80);
       const revList = (s.topReviews && s.topReviews.length > 0 ? s.topReviews : s.reviews) ?? [];
       const revNote = revList
         .slice(0, 2)
-        .map((r) => `"${r.text.slice(0, 120)}" (${r.rating}★)`)
+        .map((r) => `"${cleanBoundedText(r.text, 120)}" (${r.rating}★)`)
         .join(' / ');
       const open =
         s.openNow === true ? 'Open now' : s.openNow === false ? 'Closed now' : 'Hours unknown';
-      return `#${idx + 1} ${s.name} (${s.specialty}) — ${s.rating?.toFixed(1) ?? 'N/A'}★ (${s.userRatingCount} reviews), ${formatTravelTime(s.travelDurationSeconds)} ${modeLabel} (${formatDistance(s.distanceMeters)}), ${open}${todayHours ? `, today: ${todayHours}` : ''}${revNote ? ` | Reviews: ${revNote}` : ''}`;
+      return `#${idx + 1} ${safeName} (${safeSpecialty}) — ${s.rating?.toFixed(1) ?? 'N/A'}★ (${s.userRatingCount} reviews), ${formatTravelTime(s.travelDurationSeconds)} ${modeLabel} (${formatDistance(s.distanceMeters)}), ${open}${todayHours ? `, today: ${todayHours}` : ''}${revNote ? ` | Reviews: ${revNote}` : ''}`;
     })
     .join('\n');
 }
@@ -311,12 +324,9 @@ function normalizeParsedIntent(
   fallbackMessage: string,
   hasExistingOrigin: boolean
 ): ParsedIntent {
-  const specialistQuery =
-    typeof raw.specialistQuery === 'string' ? raw.specialistQuery.trim() || null : null;
-  const locationText =
-    typeof raw.locationText === 'string' ? raw.locationText.trim() || null : null;
-  const preferences =
-    typeof raw.preferences === 'string' ? raw.preferences.trim() || null : null;
+  const specialistQuery = cleanBoundedText(raw.specialistQuery, 120) || null;
+  const locationText = cleanBoundedText(raw.locationText, 200) || null;
+  const preferences = cleanBoundedText(raw.preferences, 160) || null;
   const validMode =
     raw.travelMode === 'WALK' || raw.travelMode === 'BICYCLE' || raw.travelMode === 'DRIVE'
       ? raw.travelMode
@@ -326,10 +336,11 @@ function normalizeParsedIntent(
     raw.action === 'set_location_only' && !specialistQuery ? 'set_location_only' : 'search';
 
   if (normalizedAction === 'search' && !specialistQuery && !locationText) {
+    const safeFallback = cleanBoundedText(fallbackMessage, 120);
     return {
       action: hasExistingOrigin ? 'search' : 'set_location_only',
-      specialistQuery: hasExistingOrigin ? fallbackMessage.trim() : null,
-      locationText: hasExistingOrigin ? null : fallbackMessage.trim(),
+      specialistQuery: hasExistingOrigin ? safeFallback || null : null,
+      locationText: hasExistingOrigin ? null : cleanBoundedText(fallbackMessage, 200) || null,
       travelMode: validMode,
       preferences,
     };
@@ -374,8 +385,8 @@ function parseKeyValueIntentLines(
 }
 
 /**
- * Classifies user intent using Gemini Grounding with Google Maps + hybrid Function Calling
- * so geographic references and place needs are grounded in live Google Maps context.
+ * Classifies user intent via Gemini Function Calling without attaching Maps Grounding,
+ * keeping routing fast, immune to hybrid tool 400 errors, and conserving Maps Grounding quota.
  */
 export async function classifyIntentWithHydrogen(
   ai: GoogleGenAI,
@@ -384,67 +395,30 @@ export async function classifyIntentWithHydrogen(
   origin: OriginLocation | null = null
 ): Promise<ParsedIntent> {
   const { persona, intentGuidance, entitySingular } = SHOWCASE_CONFIG.agent;
+  const safeMessage = cleanBoundedText(message, 400);
   const contents = `Classify this user message for ${persona}.
-Origin set: ${hasExistingOrigin ? `yes (${origin?.formattedAddress ?? 'current'})` : 'no'}.
-Message: "${message}"`;
+Origin set: ${hasExistingOrigin ? `yes (${cleanBoundedText(origin?.formattedAddress, 180) || 'current'})` : 'no'}.
+Message: "${safeMessage}"`;
 
   const systemInstruction = `You are ${persona}. ${intentGuidance} Always invoke the route_agent_action tool to return your routing decision: use action="set_location_only" if the user only shared a location, or action="search" if they want a local ${entitySingular} or place.`;
 
-  const hybridToolConfig = buildMapsToolConfig(
-    origin ? { lat: origin.lat, lng: origin.lng } : null,
-    true
-  );
+  const response = await generateWithFallback(ai, contents, {
+    systemInstruction,
+    tools: [{ functionDeclarations: [ROUTE_AGENT_ACTION_DECLARATION] }],
+  });
 
-  try {
-    const response = await generateWithFallback(ai, contents, {
-      systemInstruction,
-      tools: [
-        { googleMaps: {} },
-        { functionDeclarations: [ROUTE_AGENT_ACTION_DECLARATION] },
-      ],
-      ...(hybridToolConfig ? { toolConfig: hybridToolConfig } : {}),
-    });
-
-    const call = response.functionCalls?.find((fc) => fc.name === 'route_agent_action') ??
-      response.functionCalls?.[0];
-    if (call?.args && typeof call.args === 'object') {
-      return normalizeParsedIntent(
-        call.args as Record<string, unknown>,
-        message,
-        hasExistingOrigin
-      );
-    }
-  } catch (err) {
-    const kind = classifyGeminiError(err);
-    if (kind === 'auth' || kind === 'quota') {
-      if (kind === 'quota') markMapsGroundingQuotaCooldown();
-      throw err;
-    }
-    // Fall through to pure Maps-grounded text classification if hybrid tool calling isn't supported.
+  const call =
+    response.functionCalls?.find((fc) => fc.name === 'route_agent_action') ??
+    response.functionCalls?.[0];
+  if (call?.args && typeof call.args === 'object') {
+    return normalizeParsedIntent(
+      call.args as Record<string, unknown>,
+      safeMessage,
+      hasExistingOrigin
+    );
   }
 
-  const mapsOnlyToolConfig = buildMapsToolConfig(
-    origin ? { lat: origin.lat, lng: origin.lng } : null,
-    false
-  );
-  const fallbackResponse = await generateWithFallback(
-    ai,
-    `${contents}
-
-Respond ONLY with these lines (use "none" if absent):
-ACTION: search | set_location_only
-SPECIALIST: <category or none>
-LOCATION: <location or none>
-MODE: DRIVE | WALK | BICYCLE | none
-PREFERENCES: <preferences or none>`,
-    {
-      systemInstruction: `You are ${persona}. ${intentGuidance}`,
-      tools: [{ googleMaps: {} }],
-      ...(mapsOnlyToolConfig ? { toolConfig: mapsOnlyToolConfig } : {}),
-    }
-  );
-
-  return parseKeyValueIntentLines(fallbackResponse.text, message, hasExistingOrigin);
+  return parseKeyValueIntentLines(response.text, safeMessage, hasExistingOrigin);
 }
 
 /**
@@ -462,9 +436,9 @@ export async function runHydrogenMapsGrounding(
     travelMode === 'WALK' ? 'walking' : travelMode === 'BICYCLE' ? 'biking' : 'driving';
   const recentHistory = formatRecentHistory(history);
 
-  const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}User: "${userMessage}"
-Category: ${specialistQuery}
-Origin: ${origin.formattedAddress} (${origin.lat.toFixed(5)}, ${origin.lng.toFixed(5)})
+  const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}User: "${cleanBoundedText(userMessage, 400)}"
+Category: ${cleanBoundedText(specialistQuery, 120)}
+Origin: ${cleanBoundedText(origin.formattedAddress, 200)} (${origin.lat.toFixed(5)}, ${origin.lng.toFixed(5)})
 Mode: ${modeLabel}
 
 Reply in 2 crisp sentences (under 55 words, plain text, no markdown). Name the standout pick with its rating/review count, ${modeLabel} time, open hours if available, and one concrete takeaway from reviews to help the user decide.`;
@@ -479,7 +453,9 @@ Reply in 2 crisp sentences (under 55 words, plain text, no markdown). Name the s
 }
 
 /**
- * Maps-grounded synthesis for comparisons, open-now filtering, sorting, and shortlist decisions.
+ * Synthesis for comparisons, open-now filtering, sorting, and shortlist decisions.
+ * Uses Google Maps Grounding when enabled and ready, and degrades cleanly to ungrounded
+ * synthesis over the live Places results if Maps Grounding hits quota or is unavailable.
  */
 export async function runGroundedPlacesSynthesis(
   ai: GoogleGenAI,
@@ -487,32 +463,52 @@ export async function runGroundedPlacesSynthesis(
   specialists: Specialist[],
   origin: OriginLocation | null,
   travelMode: TravelMode,
-  history: ChatHistoryItem[] = []
+  history: ChatHistoryItem[] = [],
+  options: { useMapsGrounding?: boolean } = {}
 ): Promise<HydrogenMapsGroundingResult> {
   const recentHistory = formatRecentHistory(history);
   const context = formatSpecialistsContext(specialists, travelMode);
   const coords = resolveGroundingCoords(origin, specialists);
   const toolConfig = buildMapsToolConfig(coords);
+  const tryMapsGrounding = options.useMapsGrounding ?? isMapsGroundingReady();
 
-  const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${origin?.formattedAddress || 'Not specified'}
+  const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${cleanBoundedText(origin?.formattedAddress, 200) || 'Not specified'}
 Mapped options:
 ${context}
 
-User: "${userMessage}"
+User: "${cleanBoundedText(userMessage, 400)}"
 
 Reply in 2 crisp sentences (under 55 words, plain text, no markdown). Compare ratings/review counts, travel times, today's open hours, and a specific review highlight so the user can decide confidently.`;
 
-  const response = await generateWithFallback(ai, prompt, {
-    systemInstruction: `You are ${SHOWCASE_CONFIG.agent.persona}. Ground every recommendation and comparison in live Google Maps data.`,
-    tools: [{ googleMaps: {} }],
-    ...(toolConfig ? { toolConfig } : {}),
-  });
+  const systemInstruction = `You are ${SHOWCASE_CONFIG.agent.persona}. Ground every recommendation and comparison in live Google Maps data.`;
 
-  return extractGroundingResult(response);
+  if (tryMapsGrounding) {
+    try {
+      const response = await generateWithFallback(ai, prompt, {
+        systemInstruction,
+        tools: [{ googleMaps: {} }],
+        ...(toolConfig ? { toolConfig } : {}),
+      });
+      return extractGroundingResult(response);
+    } catch (err) {
+      const kind = classifyGeminiError(err);
+      if (kind === 'quota' || isInvalidArgumentError(err)) {
+        markMapsGroundingQuotaCooldown();
+        // Fall through to ungrounded synthesis over already-fetched live Places results
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  const ungrounded = await generateWithFallback(ai, prompt, { systemInstruction });
+  return extractGroundingResult(ungrounded);
 }
 
 /**
- * Maps-grounded Q&A for place-specific questions (hours, reviews, suitability) and open-ended guidance.
+ * Q&A for place-specific questions (hours, reviews, suitability) and open-ended guidance.
+ * Uses Google Maps Grounding when ready, and falls back to ungrounded Gemini synthesis
+ * over live mapped options when Maps Grounding is unavailable or rate-limited.
  */
 export async function runOpenEndedChatAnswer(
   ai: GoogleGenAI,
@@ -520,23 +516,42 @@ export async function runOpenEndedChatAnswer(
   specialists: Specialist[],
   origin: OriginLocation | null,
   travelMode: TravelMode,
-  history: ChatHistoryItem[] = []
+  history: ChatHistoryItem[] = [],
+  options: { useMapsGrounding?: boolean } = {}
 ): Promise<OpenEndedAnswerResult> {
   const recentHistory = formatRecentHistory(history);
   const context = formatSpecialistsContext(specialists, travelMode);
   const coords = resolveGroundingCoords(origin, specialists);
   const toolConfig = buildMapsToolConfig(coords);
+  const tryMapsGrounding = options.useMapsGrounding ?? isMapsGroundingReady();
 
-  const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${origin?.formattedAddress || 'Not set'}
-${context ? `Mapped options:\n${context}\n\n` : ''}User: "${userMessage}"
+  const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${cleanBoundedText(origin?.formattedAddress, 200) || 'Not set'}
+${context ? `Mapped options:\n${context}\n\n` : ''}User: "${cleanBoundedText(userMessage, 400)}"
 
 Answer directly in 2 crisp sentences (under 55 words, plain prose, no markdown), citing real hours, ratings, and review takeaways whenever relevant.`;
 
-  const response = await generateWithFallback(ai, prompt, {
-    systemInstruction: `You are ${SHOWCASE_CONFIG.agent.persona}. Answer concisely using live Google Maps grounding and the mapped options when present.`,
-    tools: [{ googleMaps: {} }],
-    ...(toolConfig ? { toolConfig } : {}),
-  });
+  const systemInstruction = `You are ${SHOWCASE_CONFIG.agent.persona}. Answer concisely using live Google Maps grounding and the mapped options when present.`;
+
+  let response;
+  if (tryMapsGrounding) {
+    try {
+      response = await generateWithFallback(ai, prompt, {
+        systemInstruction,
+        tools: [{ googleMaps: {} }],
+        ...(toolConfig ? { toolConfig } : {}),
+      });
+    } catch (err) {
+      const kind = classifyGeminiError(err);
+      if (kind === 'quota' || isInvalidArgumentError(err)) {
+        markMapsGroundingQuotaCooldown();
+        response = await generateWithFallback(ai, prompt, { systemInstruction });
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    response = await generateWithFallback(ai, prompt, { systemInstruction });
+  }
 
   const grounded = extractGroundingResult(response);
   const groundingSources =

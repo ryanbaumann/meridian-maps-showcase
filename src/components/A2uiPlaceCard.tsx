@@ -202,7 +202,7 @@ export function A2uiPlaceCard({
               e.stopPropagation();
               onToggleSync(specialist.id);
             }}
-            className={`relative before:absolute before:-inset-2.5 sm:before:-inset-2 flex items-center justify-center w-5 h-5 rounded border transition-colors shrink-0 cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+            className={`relative before:absolute before:-inset-3 sm:before:-inset-2 flex items-center justify-center w-5 h-5 rounded border transition-colors shrink-0 cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
               isSynced
                 ? 'bg-[var(--ink)] border-[var(--ink)] text-[var(--surface)]'
                 : 'bg-[var(--surface)] border-[var(--control-line)] text-transparent hover:border-[var(--accent)]'

@@ -16,7 +16,11 @@ describe('isUsableMapsApiKey', () => {
   });
 
   it('accepts valid non-placeholder API key strings', () => {
-    assert.equal(isUsableMapsApiKey('AIzaSyExampleKeyValue1234567890abcdef'), true);
+    assert.equal(isUsableMapsApiKey('sample_non_placeholder_key_value_01'), true);
+    assert.equal(
+      isUsableMapsApiKey(['test', 'prefix', 'key', '1234567890'].join('-')),
+      true
+    );
   });
 });
 
@@ -34,6 +38,9 @@ describe('SHOWCASE_CONFIG agent blueprint', () => {
       Math.round((agent.rankingWeights.rating + agent.rankingWeights.travelTime) * 100),
       100
     );
-    assert.deepEqual([...SHOWCASE_CONFIG.attributionIds], ['gmp_mcp_codeassist_v1_aistudio']);
+    assert.deepEqual([...SHOWCASE_CONFIG.attributionIds], [
+      'gmp_mcp_codeassist_v1_aistudio',
+      'gmp_git_agentskills_v1',
+    ]);
   });
 });

@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+
+dotenv.config({ path: ['.env.local', '.env'], quiet: true });
 import express, { type Request, type Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -6,7 +8,9 @@ import {
   buildProviderMapLinks,
   classifyIntentWithHydrogen,
   getGeminiClient,
+  isGeminiApiReady,
   isMapsGroundingReady,
+  markGeminiQuotaCooldown,
   markMapsGroundingQuotaCooldown,
   runGroundedPlacesSynthesis,
   runHydrogenMapsGrounding,
@@ -27,7 +31,6 @@ import {
 import { SHOWCASE_CONFIG } from './src/config/showcase.ts';
 import type {
   AgentSearchResponse,
-  ChatHistoryItem,
   GenUiBlock,
   GroundingSource,
   OriginLocation,
@@ -42,77 +45,30 @@ import {
   detectConversationalAction,
   isStandaloneOpenEndedQuestion,
 } from './src/utils/agentLogic.ts';
-import { classifyGeminiError, formatGeminiUserNotice } from './src/utils/geminiError.ts';
-import { buildA2uiSpecialistsBatchMessages } from './src/utils/mapsSync.ts';
+import {
+  classifyGeminiError,
+  formatGeminiCooldownNotice,
+  formatGeminiUserNotice,
+  isHardQuotaExhausted,
+  isInvalidArgumentError,
+} from './src/utils/geminiError.ts';
+import {
+  buildA2uiSpecialistsBatchMessages,
+  isValidGooglePlaceId,
+} from './src/utils/mapsSync.ts';
 import { parseFastUserMessage, rankSpecialists } from './src/utils/ranking.ts';
-import { safeExternalUrl } from './src/utils/url.ts';
+import {
+  isValidCoordinate,
+  sanitizeHistory,
+  sanitizeOrigin,
+  sanitizeSpecialists,
+} from './src/utils/sanitize.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isValidCoordinate(lat: unknown, lng: unknown): lat is number {
-  return (
-    typeof lat === 'number' &&
-    typeof lng === 'number' &&
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
-}
-
-function sanitizeOrigin(raw: unknown): OriginLocation | null {
-  if (!isRecord(raw)) return null;
-  if (!isValidCoordinate(raw.lat, raw.lng)) return null;
-  const label = typeof raw.label === 'string' ? raw.label.trim().slice(0, 120) : '';
-  const formattedAddress =
-    typeof raw.formattedAddress === 'string' ? raw.formattedAddress.trim().slice(0, 200) : '';
-  return {
-    label: label || formattedAddress || `${(raw.lat as number).toFixed(4)}, ${(raw.lng as number).toFixed(4)}`,
-    formattedAddress: formattedAddress || label || `${(raw.lat as number).toFixed(4)}, ${(raw.lng as number).toFixed(4)}`,
-    lat: raw.lat as number,
-    lng: raw.lng as number,
-  };
-}
-
-function sanitizeHistory(raw: unknown): ChatHistoryItem[] {
-  if (!Array.isArray(raw)) return [];
-  const items: ChatHistoryItem[] = [];
-  for (const entry of raw.slice(-6)) {
-    if (!isRecord(entry)) continue;
-    const role = entry.role === 'user' || entry.role === 'assistant' ? entry.role : null;
-    const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, 400) : '';
-    if (role && text) {
-      items.push({ role, text });
-    }
-  }
-  return items;
-}
-
-function sanitizeSpecialists(raw: unknown): Specialist[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .slice(0, 12)
-    .filter(
-      (item): item is Specialist =>
-        isRecord(item) &&
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        isRecord(item.location) &&
-        isValidCoordinate(item.location.lat, item.location.lng)
-    )
-    .map((item) => ({
-      ...item,
-      googleMapsUri: safeExternalUrl(item.googleMapsUri),
-      directionsUri: safeExternalUrl(item.directionsUri),
-      websiteUri: safeExternalUrl(item.websiteUri),
-    }));
 }
 
 async function startServer() {
@@ -169,7 +125,7 @@ async function startServer() {
     const mapsKey = getMapsApiKey();
     const placeId = typeof req.query.placeId === 'string' ? req.query.placeId.trim() : '';
 
-    if (!/^[A-Za-z0-9_-]{10,160}$/.test(placeId)) {
+    if (!isValidGooglePlaceId(placeId) || !/^[A-Za-z0-9_-]{10,160}$/.test(placeId)) {
       return res.status(400).json({ error: 'Invalid Google Place ID.' });
     }
     if (!mapsKey) {
@@ -229,8 +185,9 @@ async function startServer() {
           needsClientGeocode: address || null,
         });
       }
+      console.error('[Meridian] Geocode error:', err);
       return res.status(500).json({
-        error: err instanceof Error ? err.message : 'Geocoding failed.',
+        error: 'Geocoding failed. Please try again.',
       });
     }
   });
@@ -284,7 +241,7 @@ async function startServer() {
           let groundingSources: GroundingSource[] = [];
           let geminiNotice: string | undefined;
 
-          if (ai && isMapsGroundingReady() && picked.length > 0) {
+          if (ai && isGeminiApiReady() && picked.length > 0) {
             try {
               const g = await runGroundedPlacesSynthesis(
                 ai,
@@ -292,15 +249,18 @@ async function startServer() {
                 picked,
                 providedOrigin ?? null,
                 activeTravelMode,
-                safeHistory
+                safeHistory,
+                { useMapsGrounding: false }
               );
               if (g.summary) summary = g.summary;
               groundingSources = g.groundingSources;
             } catch (err) {
-              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
               console.warn('[Meridian] Shortlist synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
+          } else if (ai && !isGeminiApiReady()) {
+            geminiNotice = formatGeminiCooldownNotice();
           }
 
           if (groundingSources.length === 0 && picked.length > 0) {
@@ -317,7 +277,7 @@ async function startServer() {
             groundingSources,
             geminiNotice,
             selectForSyncIds: picked.map((s) => s.id),
-            focusSpecialistId: conversational.focusId ?? picked[0]?.id ?? null,
+            focusSpecialistId: picked.length === 1 ? picked[0].id : null,
             suggestedFollowUps: buildContextualFollowUps({
               origin: providedOrigin ?? null,
               specialists: existingList,
@@ -340,7 +300,7 @@ async function startServer() {
           let groundingSources: GroundingSource[] = [];
           let geminiNotice: string | undefined;
 
-          if (ai && isMapsGroundingReady() && reordered.length > 0) {
+          if (ai && isGeminiApiReady() && reordered.length > 0) {
             try {
               const g = await runGroundedPlacesSynthesis(
                 ai,
@@ -348,15 +308,18 @@ async function startServer() {
                 reordered.slice(0, 4),
                 providedOrigin ?? null,
                 activeTravelMode,
-                safeHistory
+                safeHistory,
+                { useMapsGrounding: false }
               );
               if (g.summary) summary = g.summary;
               groundingSources = g.groundingSources;
             } catch (err) {
-              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
               console.warn('[Meridian] Sort synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
+          } else if (ai && !isGeminiApiReady()) {
+            geminiNotice = formatGeminiCooldownNotice();
           }
 
           if (groundingSources.length === 0 && reordered.length > 0) {
@@ -373,7 +336,7 @@ async function startServer() {
             specialists: reordered,
             groundingSources,
             geminiNotice,
-            focusSpecialistId: reordered[0]?.id ?? null,
+            focusSpecialistId: null,
             genUiBlock: {
               type: 'place_cards',
               specialistIds: reordered.slice(0, 4).map((s) => s.id),
@@ -406,7 +369,7 @@ async function startServer() {
           let groundingSources: GroundingSource[] = [];
           let geminiNotice: string | undefined;
 
-          if (ai && isMapsGroundingReady() && openSpecialists.length > 0) {
+          if (ai && isGeminiApiReady() && openSpecialists.length > 0) {
             try {
               const g = await runGroundedPlacesSynthesis(
                 ai,
@@ -419,10 +382,12 @@ async function startServer() {
               if (g.summary) summary = g.summary;
               groundingSources = g.groundingSources;
             } catch (err) {
-              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
               console.warn('[Meridian] Follow-up synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
+          } else if (ai && !isGeminiApiReady()) {
+            geminiNotice = formatGeminiCooldownNotice();
           }
 
           if (groundingSources.length === 0 && openSpecialists.length > 0) {
@@ -438,7 +403,7 @@ async function startServer() {
             specialists: existingList,
             groundingSources,
             geminiNotice,
-            focusSpecialistId: openSpecialists[0]?.id ?? existingList[0]?.id ?? null,
+            focusSpecialistId: null,
             genUiBlock:
               openSpecialists.length > 0
                 ? {
@@ -472,7 +437,7 @@ async function startServer() {
           let groundingSources: GroundingSource[] = [];
           let geminiNotice: string | undefined;
 
-          if (ai && isMapsGroundingReady() && targets.length >= 2) {
+          if (ai && isGeminiApiReady() && targets.length >= 2) {
             try {
               const g = await runGroundedPlacesSynthesis(
                 ai,
@@ -485,10 +450,12 @@ async function startServer() {
               if (g.summary) summary = g.summary;
               groundingSources = g.groundingSources;
             } catch (err) {
-              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
               console.warn('[Meridian] Compare synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
+          } else if (ai && !isGeminiApiReady()) {
+            geminiNotice = formatGeminiCooldownNotice();
           }
 
           if (groundingSources.length === 0 && targets.length > 0) {
@@ -504,7 +471,7 @@ async function startServer() {
             specialists: existingList,
             groundingSources,
             geminiNotice,
-            focusSpecialistId: targets[0]?.id ?? null,
+            focusSpecialistId: null,
             genUiBlock: {
               type: 'comparison',
               specialistIds: targets.map((s) => s.id),
@@ -540,7 +507,7 @@ async function startServer() {
           });
           let geminiNotice: string | undefined;
 
-          if (ai && isMapsGroundingReady()) {
+          if (ai && isGeminiApiReady()) {
             try {
               const g = await runOpenEndedChatAnswer(
                 ai,
@@ -554,10 +521,12 @@ async function startServer() {
               if (g.groundingSources.length > 0) groundingSources = g.groundingSources;
               if (g.suggestedFollowUps.length > 0) suggestedFollowUps = g.suggestedFollowUps;
             } catch (err) {
-              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
               console.warn('[Meridian] QA synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
+          } else if (ai && !isGeminiApiReady()) {
+            geminiNotice = formatGeminiCooldownNotice();
           }
 
           if (groundingSources.length === 0) {
@@ -577,7 +546,7 @@ async function startServer() {
             specialists: existingList,
             groundingSources,
             geminiNotice,
-            focusSpecialistId: focused?.id ?? null,
+            focusSpecialistId: conversational.kind === 'provider_qa' ? focused?.id ?? null : null,
             genUiBlock:
               conversational.kind === 'provider_qa' && focused
                 ? { type: 'provider_spotlight', specialistId: focused.id }
@@ -604,7 +573,7 @@ async function startServer() {
         let groundingSources: GroundingSource[] = [];
         let geminiNotice: string | undefined;
 
-        if (ai && isMapsGroundingReady()) {
+        if (ai && isGeminiApiReady()) {
           try {
             const g = await runOpenEndedChatAnswer(
               ai,
@@ -618,10 +587,12 @@ async function startServer() {
             if (g.suggestedFollowUps.length > 0) suggestedFollowUps = g.suggestedFollowUps;
             groundingSources = g.groundingSources;
           } catch (err) {
-            if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+            if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
             console.warn('[Meridian] Open-ended chat unavailable:', classifyGeminiError(err));
             geminiNotice = formatGeminiUserNotice(err);
           }
+        } else if (ai && !isGeminiApiReady()) {
+          geminiNotice = formatGeminiCooldownNotice();
         }
 
         if (groundingSources.length === 0) {
@@ -669,7 +640,7 @@ async function startServer() {
         const fastParsed = parseFastUserMessage(userText, Boolean(providedOrigin));
         if (fastParsed) {
           intent = fastParsed;
-        } else if (ai && isMapsGroundingReady()) {
+        } else if (ai && isGeminiApiReady()) {
           try {
             intent = await classifyIntentWithHydrogen(
               ai,
@@ -678,7 +649,7 @@ async function startServer() {
               providedOrigin
             );
           } catch (err) {
-            if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+            if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
             console.warn('[Meridian] Intent classification fallback:', classifyGeminiError(err));
             intent = {
               action: providedOrigin ? 'search' : 'set_location_only',
@@ -783,7 +754,8 @@ async function startServer() {
       }
 
       // 5. Parallel Places API (New) routing search + Gemini Maps Grounding
-      const shouldTryGrounding = Boolean(ai) && isMapsGroundingReady();
+      const geminiReady = Boolean(ai) && isGeminiApiReady();
+      const shouldTryGrounding = geminiReady && isMapsGroundingReady();
       const [placesOutcome, groundingOutcome] = await Promise.allSettled([
         searchPlacesWithRoutingServer(
           specialistQuery,
@@ -840,12 +812,13 @@ async function startServer() {
         groundingSources = groundingOutcome.value.groundingSources;
       } else {
         geminiFailure = groundingOutcome.reason;
-        if (classifyGeminiError(geminiFailure) === 'quota') {
+        if (classifyGeminiError(geminiFailure) === 'quota' || isInvalidArgumentError(geminiFailure)) {
           markMapsGroundingQuotaCooldown();
         }
       }
 
-      if (!agentSummary && ai && isMapsGroundingReady() && specialists.length > 0) {
+      // If Maps Grounding skipped or failed, synthesize directly over the live Places results
+      if (!agentSummary && ai && isGeminiApiReady() && specialists.length > 0) {
         try {
           const synth = await runGroundedPlacesSynthesis(
             ai,
@@ -853,7 +826,8 @@ async function startServer() {
             specialists,
             resolvedOrigin,
             activeTravelMode,
-            safeHistory
+            safeHistory,
+            { useMapsGrounding: false }
           );
           if (synth.summary) {
             agentSummary = synth.summary;
@@ -863,12 +837,16 @@ async function startServer() {
             groundingSources = synth.groundingSources;
           }
         } catch (synthErr) {
-          if (classifyGeminiError(synthErr) === 'quota') markMapsGroundingQuotaCooldown();
+          if (isHardQuotaExhausted(synthErr)) markGeminiQuotaCooldown();
           geminiFailure = synthErr;
         }
       }
 
-      const geminiNotice = geminiFailure ? formatGeminiUserNotice(geminiFailure) : undefined;
+      const geminiNotice = geminiFailure
+        ? formatGeminiUserNotice(geminiFailure)
+        : ai && !isGeminiApiReady()
+          ? formatGeminiCooldownNotice()
+          : undefined;
 
       if (!agentSummary) {
         agentSummary = buildDeterministicAgentReply({
@@ -920,7 +898,7 @@ async function startServer() {
             ? buildA2uiSpecialistsBatchMessages(`specialists_${Date.now()}`, specialists, 'horizontal')
             : [],
         genUiBlock,
-        focusSpecialistId: genUiIds[0] ?? specialists[0]?.id ?? null,
+        focusSpecialistId: null,
         suggestedFollowUps: buildContextualFollowUps({
           origin: resolvedOrigin,
           specialists,
@@ -941,7 +919,7 @@ async function startServer() {
       }
       console.error('Agent error:', err);
       return res.status(500).json({
-        error: err instanceof Error ? err.message : 'Unexpected server error.',
+        error: 'Unexpected server error. Please try again.',
       });
     }
   });

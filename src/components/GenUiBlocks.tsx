@@ -200,9 +200,9 @@ export function GenUiBlockRenderer({
         ) : (
           <>
             <div className="sticky top-0 z-10 px-3 py-2 bg-[var(--surface-subtle)] border-b border-[var(--line)] flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-[var(--ink)]">
+              <h2 className="text-xs font-semibold text-[var(--ink)]">
                 {block.title || 'Comparison'}
-              </span>
+              </h2>
               <span className="text-[11px] text-[var(--muted)] tabular-nums">
                 {items.length} options
               </span>
@@ -334,6 +334,7 @@ export function GenUiBlockRenderer({
                         className="inline-flex items-center gap-0.5 min-h-[44px] sm:min-h-0 font-semibold text-[var(--ink)] hover:text-[var(--accent-text)] whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
                       >
                         <span>Details</span>
+                        <span className="sr-only"> for {clinic.name}</span>
                         <ChevronRight className="w-3 h-3" aria-hidden="true" />
                       </button>
                     </div>
@@ -371,9 +372,9 @@ export function GenUiBlockRenderer({
     <div className="space-y-2" data-testid="specialist-list">
       <div className="flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex items-center gap-1.5 text-xs">
-          <span className="font-semibold text-[var(--ink)]">
+          <h2 className="font-semibold text-[var(--ink)]">
             {block.title || `${orderedCards.length} matches`}
-          </span>
+          </h2>
           <span aria-hidden="true" className="text-[var(--muted)] opacity-50">
             ·
           </span>

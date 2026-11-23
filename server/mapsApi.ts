@@ -19,6 +19,8 @@ import {
   computeStarRatingDistribution,
   selectTopReviews,
 } from '../src/utils/reviews.ts';
+import { isUsableApiKey } from '../src/utils/sanitize.ts';
+import { isAllowedGooglePhotoRedirectUrl } from '../src/utils/url.ts';
 
 const ATTRIBUTION_SOLUTION_ID = SHOWCASE_CONFIG.primarySolutionId;
 
@@ -37,11 +39,7 @@ export class ReferrerRestrictedError extends Error {
 }
 
 export function isUsableMapsApiKey(value: string | undefined | null): value is string {
-  if (typeof value !== 'string') return false;
-  const trimmed = value.trim();
-  if (!trimmed || /\s/.test(trimmed)) return false;
-  if (/^(?:MY_|YOUR_|PLACEHOLDER|REPLACE_|ENTER_)/i.test(trimmed)) return false;
-  return true;
+  return isUsableApiKey(value);
 }
 
 export function getMapsApiKey(): string {
@@ -480,7 +478,7 @@ export async function fetchPlacePhotoUri(
   }
 
   const json = (await metaRes.json()) as { photoUri?: string };
-  if (!json.photoUri || !json.photoUri.startsWith('https://')) {
+  if (!json.photoUri || !isAllowedGooglePhotoRedirectUrl(json.photoUri)) {
     return { status: 404 };
   }
 
@@ -588,7 +586,7 @@ export async function fetchPlaceDetailsInsights(
         reviews: [],
         topReviews: [],
         ratingDistribution: null,
-        error: data.error?.message || 'Unable to fetch place details.',
+        error: 'Unable to fetch place details.',
       },
     };
   }
