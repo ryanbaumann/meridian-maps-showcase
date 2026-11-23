@@ -1,3 +1,4 @@
+import { SHOWCASE_CONFIG } from '../config/showcase.ts';
 import type {
   OriginLocation,
   SortMode,
@@ -6,6 +7,13 @@ import type {
   TravelMode,
 } from '../types';
 import { formatDistance, formatTravelTime } from './ranking.ts';
+
+const NEW_CATEGORY_PATTERN = new RegExp(
+  `\\b(?:${SHOWCASE_CONFIG.agent.knownCategories
+    .map((cat) => cat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')})s?\\b`,
+  'i'
+);
 
 export interface ConversationalActionMatch {
   kind:
@@ -111,11 +119,9 @@ export function detectConversationalAction(
     return null;
   }
 
-  // If user asks for a totally different specialty, treat as a fresh search
-  const newSpecialtyPattern =
-    /\b(?:orthodontist|dermatologist|optometrist|ophthalmologist|pediatrician|cardiologist|chiropractor|therapist|psychiatrist|podiatrist|allergist|urologist|gynecologist|obgyn|endodontist|periodontist|prosthodontist|oral surgeon|urgent care|primary care|doctor|dentist)\b/i;
+  // If user asks for a totally different category/specialty, treat as a fresh search
   const activeSpecialtyLower = (currentSpecialists[0]?.specialty || '').toLowerCase();
-  const specMatch = trimmed.match(newSpecialtyPattern);
+  const specMatch = trimmed.match(NEW_CATEGORY_PATTERN);
   if (
     specMatch &&
     !activeSpecialtyLower.includes(specMatch[0].toLowerCase().slice(0, 5)) &&
@@ -311,37 +317,14 @@ export function buildContextualFollowUps(opts: {
   const { origin, specialists, travelMode, actionJustTaken, syncedCount } = opts;
 
   if (!origin && specialists.length === 0) {
-    return [
-      {
-        label: 'Dentist in San Francisco',
-        prompt: 'Find a top-rated dentist near San Francisco, CA with a quick drive',
-      },
-      {
-        label: 'Dermatologist in Brooklyn',
-        prompt: 'Who is the best dermatologist near Brooklyn, NY?',
-      },
-      {
-        label: 'Optometrist in Austin',
-        prompt: 'Find a highly rated optometrist near Austin, TX',
-      },
-    ];
+    return [...SHOWCASE_CONFIG.agent.noOriginFollowUps];
   }
 
   if (origin && specialists.length === 0) {
-    return [
-      {
-        label: 'Top-rated dentist nearby',
-        prompt: `Find a top-rated dentist near ${origin.label}`,
-      },
-      {
-        label: 'Dermatologist open today',
-        prompt: `Find a dermatologist near ${origin.label} open today`,
-      },
-      {
-        label: 'Optometrist with short travel',
-        prompt: `Find the fastest high-rated optometrist near ${origin.label}`,
-      },
-    ];
+    return SHOWCASE_CONFIG.agent.originFollowUpTemplates.map((tpl) => ({
+      label: tpl.label,
+      prompt: tpl.promptTemplate.replace('{location}', origin.label),
+    }));
   }
 
   const prompts: SuggestedPrompt[] = [];
@@ -396,6 +379,30 @@ export function buildContextualFollowUps(opts: {
  * Synthesizes a clean, factual provider-grounded answer when the Gemini model is unavailable
  * or for instantaneous deterministic actions (sort, filter, shortlist confirmation).
  */
+function formatRatingSummary(s: Specialist): string {
+  if (s.rating == null) return 'unrated';
+  return s.userRatingCount > 0
+    ? `${s.rating.toFixed(1)}★ (${s.userRatingCount.toLocaleString()} reviews)`
+    : `${s.rating.toFixed(1)}★`;
+}
+
+function formatHoursSnippet(s: Specialist): string {
+  const hours = getTodayHoursSummary(s.weekdayDescriptions);
+  if (s.openNow === true) {
+    return hours ? `open today ${hours}` : 'open now';
+  }
+  if (s.openNow === false) {
+    return hours ? `closed now (today: ${hours})` : 'closed now';
+  }
+  return hours ? `today: ${hours}` : '';
+}
+
+function getReviewHighlight(s: Specialist, maxLen = 110): string {
+  const text = (s.topReviews?.[0]?.text || s.reviews?.[0]?.text || '').trim();
+  if (!text) return '';
+  return text.length > maxLen ? `${text.slice(0, maxLen - 1).trimEnd()}…` : text;
+}
+
 export function buildDeterministicAgentReply(opts: {
   action: 'compare' | 'filter_open' | 'sort_change' | 'sync_select' | 'provider_qa' | 'search';
   specialists: Specialist[];
@@ -419,11 +426,12 @@ export function buildDeterministicAgentReply(opts: {
 
   if (action === 'filter_open') {
     if (specialists.length === 0) {
-      return 'None of these options are open right now. Check each card for upcoming hours.';
+      return 'None of these options are open right now. Open Details on any card to check upcoming weekly hours.';
     }
     const bestOpen = specialists[0];
-    const hours = getTodayHoursSummary(bestOpen.weekdayDescriptions);
-    return `${specialists.length} options are open now. ${bestOpen.name} leads at ${bestOpen.rating?.toFixed(1) ?? 'N/A'}★ and a ${formatTravelTime(bestOpen.travelDurationSeconds)} ${modeWord}${hours ? ` (${hours})` : ''}.`;
+    const hoursPart = formatHoursSnippet(bestOpen);
+    const rev = getReviewHighlight(bestOpen, 95);
+    return `${specialists.length} options are open now. ${bestOpen.name} leads at ${formatRatingSummary(bestOpen)}, ${formatTravelTime(bestOpen.travelDurationSeconds)} ${modeWord}${hoursPart ? `, ${hoursPart}` : ''}.${rev ? ` Reviewers note: "${rev}"` : ''}`;
   }
 
   if (action === 'compare' && specialists.length >= 2) {
@@ -431,24 +439,21 @@ export function buildDeterministicAgentReply(opts: {
     const faster =
       (a.travelDurationSeconds ?? Infinity) <= (b.travelDurationSeconds ?? Infinity) ? a : b;
     const higherRated = (a.rating ?? 0) >= (b.rating ?? 0) ? a : b;
+    const fasterHours = formatHoursSnippet(faster);
+    const ratedHours = formatHoursSnippet(higherRated);
     if (faster.id === higherRated.id) {
-      return `${faster.name} leads on both travel (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}) and rating (${faster.rating?.toFixed(1) ?? 'N/A'}★).`;
+      return `${faster.name} leads on both travel (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}) and rating (${formatRatingSummary(faster)})${fasterHours ? `, ${fasterHours}` : ''}.`;
     }
-    return `${faster.name} is quickest (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}, ${formatDistance(faster.distanceMeters)}), while ${higherRated.name} leads on rating (${higherRated.rating?.toFixed(1) ?? 'N/A'}★).`;
+    return `${faster.name} is quickest (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}, ${formatDistance(faster.distanceMeters)}${fasterHours ? `, ${fasterHours}` : ''}), while ${higherRated.name} leads on rating (${formatRatingSummary(higherRated)}${ratedHours ? `, ${ratedHours}` : ''}).`;
   }
 
   if (action === 'provider_qa' && focused) {
-    const hours = getTodayHoursSummary(focused.weekdayDescriptions);
-    const reviewNote = focused.reviews?.[0]?.text
-      ? ` Review: "${focused.reviews[0].text.slice(0, 120)}${focused.reviews[0].text.length > 120 ? '…' : ''}"`
-      : '';
-    const status =
-      focused.openNow === true
-        ? 'Open now'
-        : focused.openNow === false
-          ? 'Closed now'
-          : 'Hours below';
-    return `${focused.name}: ${focused.rating?.toFixed(1) ?? 'N/A'}★, ${formatTravelTime(focused.travelDurationSeconds)} ${modeWord}. ${status}${hours ? ` (${hours})` : ''}.${reviewNote}`;
+    const hoursPart = formatHoursSnippet(focused);
+    const rev = getReviewHighlight(focused, 120);
+    const statusText = hoursPart
+      ? `${hoursPart.charAt(0).toUpperCase()}${hoursPart.slice(1)}`
+      : 'Check hours below';
+    return `${focused.name}: ${formatRatingSummary(focused)}, ${formatTravelTime(focused.travelDurationSeconds)} ${modeWord}. ${statusText}.${rev ? ` Review: "${rev}"` : ''}`;
   }
 
   if (action === 'sort_change' && specialists.length > 0) {
@@ -459,15 +464,18 @@ export function buildDeterministicAgentReply(opts: {
         : sortMode === 'rating'
           ? 'highest rating'
           : 'best overall balance';
-    return `Ranked by ${modeDesc}. ${top.name} is #1 (${top.rating?.toFixed(1) ?? 'N/A'}★, ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}).`;
+    const hoursPart = formatHoursSnippet(top);
+    return `Ranked by ${modeDesc}. ${top.name} is #1 at ${formatRatingSummary(top)} and ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}${hoursPart ? ` (${hoursPart})` : ''}.`;
   }
 
   if (specialists.length > 0) {
     const top = specialists[0];
     const openCount = specialists.filter((s) => s.openNow === true).length;
-    const openSuffix = openCount > 0 ? ` (${openCount} open)` : '';
-    return `Found ${specialists.length} ${specialistQuery || 'specialist'} options near ${origin?.label || 'you'}${openSuffix}. ${top.name} ranks #1 (${top.rating?.toFixed(1) ?? 'N/A'}★, ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}).`;
+    const openSuffix = openCount > 0 ? ` (${openCount} open now)` : '';
+    const hoursPart = formatHoursSnippet(top);
+    const rev = getReviewHighlight(top, 95);
+    return `Found ${specialists.length} ${specialistQuery || SHOWCASE_CONFIG.agent.entitySingular} options near ${origin?.label || 'you'}${openSuffix}. Top pick ${top.name} holds ${formatRatingSummary(top)}, ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}${hoursPart ? `, ${hoursPart}` : ''}.${rev ? ` Reviewers note: "${rev}"` : ''}`;
   }
 
-  return `No ${specialistQuery || 'specialist'} matches near ${origin?.label || 'that area'}. Try a wider search.`;
+  return `No ${specialistQuery || SHOWCASE_CONFIG.agent.entitySingular} matches near ${origin?.label || 'that area'}. Try a wider search.`;
 }

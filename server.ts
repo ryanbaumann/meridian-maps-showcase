@@ -24,6 +24,7 @@ import {
   reverseGeocodeServer,
   searchPlacesWithRoutingServer,
 } from './server/mapsApi.ts';
+import { SHOWCASE_CONFIG } from './src/config/showcase.ts';
 import type {
   AgentSearchResponse,
   ChatHistoryItem,
@@ -274,19 +275,47 @@ async function startServer() {
         if (conversational.kind === 'sync_select') {
           const targetSet = new Set(conversational.targetIds ?? []);
           const picked = existingList.filter((s) => targetSet.has(s.id));
+          let summary = buildDeterministicAgentReply({
+            action: 'sync_select',
+            specialists: picked,
+            origin: providedOrigin ?? null,
+            travelMode: activeTravelMode,
+          });
+          let groundingSources: GroundingSource[] = [];
+          let geminiNotice: string | undefined;
+
+          if (ai && isMapsGroundingReady() && picked.length > 0) {
+            try {
+              const g = await runGroundedPlacesSynthesis(
+                ai,
+                userText,
+                picked,
+                providedOrigin ?? null,
+                activeTravelMode,
+                safeHistory
+              );
+              if (g.summary) summary = g.summary;
+              groundingSources = g.groundingSources;
+            } catch (err) {
+              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              console.warn('[Meridian] Shortlist synthesis unavailable:', classifyGeminiError(err));
+              geminiNotice = formatGeminiUserNotice(err);
+            }
+          }
+
+          if (groundingSources.length === 0 && picked.length > 0) {
+            groundingSources = buildProviderMapLinks(picked, summary, 3);
+          }
+
           return res.json({
             action: 'sync_select',
             origin: providedOrigin ?? null,
             specialistQuery: activeSpecialty ?? null,
             travelMode: activeTravelMode,
-            agentSummary: buildDeterministicAgentReply({
-              action: 'sync_select',
-              specialists: picked,
-              origin: providedOrigin ?? null,
-              travelMode: activeTravelMode,
-            }),
+            agentSummary: summary,
             specialists: existingList,
-            groundingSources: [],
+            groundingSources,
+            geminiNotice,
             selectForSyncIds: picked.map((s) => s.id),
             focusSpecialistId: conversational.focusId ?? picked[0]?.id ?? null,
             suggestedFollowUps: buildContextualFollowUps({
@@ -301,21 +330,49 @@ async function startServer() {
 
         if (conversational.kind === 'sort_change' && conversational.sortMode) {
           const reordered = rankSpecialists(existingList, conversational.sortMode);
+          let summary = buildDeterministicAgentReply({
+            action: 'sort_change',
+            specialists: reordered,
+            origin: providedOrigin ?? null,
+            travelMode: activeTravelMode,
+            sortMode: conversational.sortMode,
+          });
+          let groundingSources: GroundingSource[] = [];
+          let geminiNotice: string | undefined;
+
+          if (ai && isMapsGroundingReady() && reordered.length > 0) {
+            try {
+              const g = await runGroundedPlacesSynthesis(
+                ai,
+                userText,
+                reordered.slice(0, 4),
+                providedOrigin ?? null,
+                activeTravelMode,
+                safeHistory
+              );
+              if (g.summary) summary = g.summary;
+              groundingSources = g.groundingSources;
+            } catch (err) {
+              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
+              console.warn('[Meridian] Sort synthesis unavailable:', classifyGeminiError(err));
+              geminiNotice = formatGeminiUserNotice(err);
+            }
+          }
+
+          if (groundingSources.length === 0 && reordered.length > 0) {
+            groundingSources = buildProviderMapLinks(reordered, summary, 3);
+          }
+
           return res.json({
             action: 'sort_change',
             origin: providedOrigin ?? null,
             specialistQuery: activeSpecialty ?? null,
             travelMode: activeTravelMode,
             sortMode: conversational.sortMode,
-            agentSummary: buildDeterministicAgentReply({
-              action: 'sort_change',
-              specialists: reordered,
-              origin: providedOrigin ?? null,
-              travelMode: activeTravelMode,
-              sortMode: conversational.sortMode,
-            }),
+            agentSummary: summary,
             specialists: reordered,
-            groundingSources: [],
+            groundingSources,
+            geminiNotice,
             focusSpecialistId: reordered[0]?.id ?? null,
             genUiBlock: {
               type: 'place_cards',
@@ -349,7 +406,7 @@ async function startServer() {
           let groundingSources: GroundingSource[] = [];
           let geminiNotice: string | undefined;
 
-          if (ai && openSpecialists.length > 0) {
+          if (ai && isMapsGroundingReady() && openSpecialists.length > 0) {
             try {
               const g = await runGroundedPlacesSynthesis(
                 ai,
@@ -362,6 +419,7 @@ async function startServer() {
               if (g.summary) summary = g.summary;
               groundingSources = g.groundingSources;
             } catch (err) {
+              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
               console.warn('[Meridian] Follow-up synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
@@ -414,7 +472,7 @@ async function startServer() {
           let groundingSources: GroundingSource[] = [];
           let geminiNotice: string | undefined;
 
-          if (ai && targets.length >= 2) {
+          if (ai && isMapsGroundingReady() && targets.length >= 2) {
             try {
               const g = await runGroundedPlacesSynthesis(
                 ai,
@@ -427,6 +485,7 @@ async function startServer() {
               if (g.summary) summary = g.summary;
               groundingSources = g.groundingSources;
             } catch (err) {
+              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
               console.warn('[Meridian] Compare synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
@@ -481,7 +540,7 @@ async function startServer() {
           });
           let geminiNotice: string | undefined;
 
-          if (ai) {
+          if (ai && isMapsGroundingReady()) {
             try {
               const g = await runOpenEndedChatAnswer(
                 ai,
@@ -495,6 +554,7 @@ async function startServer() {
               if (g.groundingSources.length > 0) groundingSources = g.groundingSources;
               if (g.suggestedFollowUps.length > 0) suggestedFollowUps = g.suggestedFollowUps;
             } catch (err) {
+              if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
               console.warn('[Meridian] QA synthesis unavailable:', classifyGeminiError(err));
               geminiNotice = formatGeminiUserNotice(err);
             }
@@ -533,7 +593,7 @@ async function startServer() {
 
       // 2. Standalone general questions before any search
       if (!explicitSpecialty && existingList.length === 0 && isStandaloneOpenEndedQuestion(userText)) {
-        let summary = 'Share a city or ZIP to map nearby specialists with live travel times.';
+        let summary = `Share a city or ZIP to map nearby ${SHOWCASE_CONFIG.agent.entityPlural} with live travel times.`;
         let suggestedFollowUps = buildContextualFollowUps({
           origin: providedOrigin ?? null,
           specialists: [],
@@ -544,7 +604,7 @@ async function startServer() {
         let groundingSources: GroundingSource[] = [];
         let geminiNotice: string | undefined;
 
-        if (ai) {
+        if (ai && isMapsGroundingReady()) {
           try {
             const g = await runOpenEndedChatAnswer(
               ai,
@@ -558,6 +618,7 @@ async function startServer() {
             if (g.suggestedFollowUps.length > 0) suggestedFollowUps = g.suggestedFollowUps;
             groundingSources = g.groundingSources;
           } catch (err) {
+            if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
             console.warn('[Meridian] Open-ended chat unavailable:', classifyGeminiError(err));
             geminiNotice = formatGeminiUserNotice(err);
           }
@@ -608,10 +669,16 @@ async function startServer() {
         const fastParsed = parseFastUserMessage(userText, Boolean(providedOrigin));
         if (fastParsed) {
           intent = fastParsed;
-        } else if (ai) {
+        } else if (ai && isMapsGroundingReady()) {
           try {
-            intent = await classifyIntentWithHydrogen(ai, userText, Boolean(providedOrigin));
+            intent = await classifyIntentWithHydrogen(
+              ai,
+              userText,
+              Boolean(providedOrigin),
+              providedOrigin
+            );
           } catch (err) {
+            if (classifyGeminiError(err) === 'quota') markMapsGroundingQuotaCooldown();
             console.warn('[Meridian] Intent classification fallback:', classifyGeminiError(err));
             intent = {
               action: providedOrigin ? 'search' : 'set_location_only',
@@ -663,7 +730,7 @@ async function startServer() {
           specialistQuery: null,
           travelMode: activeTravelMode,
           agentSummary: resolvedOrigin
-            ? `Centered on ${resolvedOrigin.label}. Pick a specialist below or type one.`
+            ? `Centered on ${resolvedOrigin.label}. Pick a ${SHOWCASE_CONFIG.agent.entitySingular} below or type one.`
             : `Locating "${intent.locationText}"...`,
           specialists: [],
           groundingSources: [],
@@ -679,6 +746,7 @@ async function startServer() {
       }
 
       if (!resolvedOrigin && !needsClientGeocode) {
+        const targetCategory = intent.specialistQuery || SHOWCASE_CONFIG.agent.defaultCategory;
         return res.json({
           action: 'needs_location',
           origin: null,
@@ -691,20 +759,10 @@ async function startServer() {
             type: 'location_prompt',
             pendingSpecialty: intent.specialistQuery,
           },
-          suggestedFollowUps: [
-            {
-              label: 'San Francisco, CA',
-              prompt: `${intent.specialistQuery || 'Dentist'} near San Francisco, CA`,
-            },
-            {
-              label: 'Brooklyn, NY',
-              prompt: `${intent.specialistQuery || 'Dentist'} near Brooklyn, NY`,
-            },
-            {
-              label: 'Austin, TX',
-              prompt: `${intent.specialistQuery || 'Dentist'} near Austin, TX`,
-            },
-          ],
+          suggestedFollowUps: SHOWCASE_CONFIG.agent.exampleCities.map((city) => ({
+            label: city,
+            prompt: `${targetCategory} near ${city}`,
+          })),
         } satisfies AgentSearchResponse);
       }
 
@@ -787,7 +845,7 @@ async function startServer() {
         }
       }
 
-      if (!agentSummary && ai && specialists.length > 0) {
+      if (!agentSummary && ai && isMapsGroundingReady() && specialists.length > 0) {
         try {
           const synth = await runGroundedPlacesSynthesis(
             ai,
@@ -801,7 +859,11 @@ async function startServer() {
             agentSummary = synth.summary;
             geminiFailure = null;
           }
+          if (groundingSources.length === 0 && synth.groundingSources.length > 0) {
+            groundingSources = synth.groundingSources;
+          }
         } catch (synthErr) {
+          if (classifyGeminiError(synthErr) === 'quota') markMapsGroundingQuotaCooldown();
           geminiFailure = synthErr;
         }
       }

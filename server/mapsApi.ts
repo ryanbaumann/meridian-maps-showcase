@@ -36,12 +36,25 @@ export class ReferrerRestrictedError extends Error {
   }
 }
 
+export function isUsableMapsApiKey(value: string | undefined | null): value is string {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  if (/^(?:MY_|YOUR_|PLACEHOLDER|REPLACE_|ENTER_)/i.test(trimmed)) return false;
+  return true;
+}
+
 export function getMapsApiKey(): string {
-  return (
-    process.env.GOOGLE_MAPS_API_KEY ||
-    process.env.VITE_GOOGLE_MAPS_API_KEY ||
-    ''
-  ).trim();
+  const candidates = [
+    process.env.GOOGLE_MAPS_API_KEY,
+    process.env.VITE_GOOGLE_MAPS_API_KEY,
+  ];
+  for (const candidate of candidates) {
+    if (isUsableMapsApiKey(candidate)) {
+      return candidate.trim();
+    }
+  }
+  return '';
 }
 
 export function getRequestReferer(req: Request): string {
@@ -95,7 +108,8 @@ function mapRawReviews(rawReviews?: RawPlaceReview[]): PlaceReview[] {
     .filter((r) => Boolean((r.text?.text || r.originalText?.text)?.trim()))
     .slice(0, 5)
     .map((r) => ({
-      authorName: r.authorAttribution?.displayName?.trim() || 'Patient',
+      authorName:
+        r.authorAttribution?.displayName?.trim() || SHOWCASE_CONFIG.agent.reviewerFallbackName,
       authorUri: normalizeAttributionUri(r.authorAttribution?.uri),
       rating: typeof r.rating === 'number' ? r.rating : 5,
       text: (r.text?.text || r.originalText?.text || '').trim(),

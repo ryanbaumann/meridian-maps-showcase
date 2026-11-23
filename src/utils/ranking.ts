@@ -1,3 +1,4 @@
+import { SHOWCASE_CONFIG } from '../config/showcase.ts';
 import type { LatLng, ParsedIntent, SortMode, Specialist, TravelMode } from '../types';
 
 /**
@@ -107,7 +108,8 @@ export function computeCompositeScore(specialist: Specialist, maxDurationSeconds
     timeNorm = Math.max(0, Math.min(1, 1 - specialist.travelDurationSeconds / (ceiling * 1.15)));
   }
 
-  const raw = (ratingNorm * 0.55 + timeNorm * 0.45) * 100;
+  const { rating: ratingWeight, travelTime: travelWeight } = SHOWCASE_CONFIG.agent.rankingWeights;
+  const raw = (ratingNorm * ratingWeight + timeNorm * travelWeight) * 100;
   return Math.round(raw);
 }
 
@@ -153,44 +155,7 @@ export function rankSpecialists(specialists: Specialist[], sortMode: SortMode): 
   });
 }
 
-const KNOWN_SPECIALISTS = [
-  'dentist',
-  'dental',
-  'orthodontist',
-  'endodontist',
-  'periodontist',
-  'pediatric dentist',
-  'cosmetic dentist',
-  'oral surgeon',
-  'dermatologist',
-  'optometrist',
-  'ophthalmologist',
-  'physical therapist',
-  'physical therapy',
-  'chiropractor',
-  'cardiologist',
-  'pediatrician',
-  'primary care',
-  'urgent care',
-  'ent',
-  'allergist',
-  'podiatrist',
-  'therapist',
-  'psychiatrist',
-  'psychologist',
-  'obgyn',
-  'gynecologist',
-  'neurologist',
-  'orthopedist',
-  'orthopedic',
-  'urologist',
-  'gastroenterologist',
-  'doctor',
-  'clinic',
-  'specialist',
-  'veterinarian',
-  'vet',
-];
+const KNOWN_SPECIALISTS: readonly string[] = SHOWCASE_CONFIG.agent.knownCategories;
 
 /**
  * Fast deterministic parser for common specialist + location phrasings so simple queries

@@ -686,41 +686,6 @@ export function SpecialistMap({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                if (mapViewMode === 'vector') {
-                  onChangeCamera3DView('street');
-                  onChangeMapViewMode('3d');
-                } else {
-                  onChangeCamera3DView(camera3DView === 'orbit' ? 'street' : 'orbit');
-                }
-              }}
-              aria-pressed={mapViewMode === '3d' ? camera3DView === 'orbit' : undefined}
-              aria-label={
-                mapViewMode === '3d'
-                  ? `Orbit ${selectedSpecialist.name} in 3D`
-                  : `Inspect ${selectedSpecialist.name} in 3D`
-              }
-              className={`inline-flex items-center gap-1 h-8 px-2.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
-                mapViewMode === '3d' && camera3DView === 'orbit'
-                  ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
-                  : 'border-[var(--line)] text-[var(--ink)] hover:border-[var(--accent)]'
-              }`}
-            >
-              {mapViewMode === 'vector' ? (
-                <>
-                  <Box className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>3D</span>
-                </>
-              ) : (
-                <>
-                  <Orbit className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>{camera3DView === 'orbit' ? 'Stop' : 'Orbit'}</span>
-                </>
-              )}
-            </button>
-
             {directionsHref && (
               <a
                 href={directionsHref}

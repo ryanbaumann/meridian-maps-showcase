@@ -1,7 +1,9 @@
-import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type, type FunctionDeclaration } from '@google/genai';
+import { SHOWCASE_CONFIG } from '../src/config/showcase.ts';
 import type {
   ChatHistoryItem,
   GroundingSource,
+  LatLng,
   OriginLocation,
   ParsedIntent,
   ReviewSnippet,
@@ -119,6 +121,34 @@ async function generateWithFallback(
   );
 }
 
+function buildMapsToolConfig(
+  coords?: LatLng | null,
+  includeServerSideToolInvocations = false
+): Record<string, unknown> | undefined {
+  const toolConfig: Record<string, unknown> = {};
+  if (includeServerSideToolInvocations) {
+    toolConfig.includeServerSideToolInvocations = true;
+  }
+  if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+    toolConfig.retrievalConfig = {
+      latLng: {
+        latitude: coords.lat,
+        longitude: coords.lng,
+      },
+    };
+  }
+  return Object.keys(toolConfig).length > 0 ? toolConfig : undefined;
+}
+
+function resolveGroundingCoords(
+  origin: OriginLocation | null,
+  specialists: Specialist[]
+): LatLng | null {
+  if (origin) return { lat: origin.lat, lng: origin.lng };
+  if (specialists[0]?.location) return specialists[0].location;
+  return null;
+}
+
 export interface HydrogenMapsGroundingResult {
   summary: string;
   groundingSources: GroundingSource[];
@@ -133,7 +163,7 @@ export interface OpenEndedAnswerResult {
 function formatRecentHistory(history: ChatHistoryItem[]): string {
   return history
     .slice(-4)
-    .map((h) => `${h.role === 'user' ? 'User' : 'Meridian'}: ${h.text}`)
+    .map((h) => `${h.role === 'user' ? 'User' : SHOWCASE_CONFIG.brandName}: ${h.text}`)
     .join('\n');
 }
 
@@ -148,11 +178,14 @@ function formatSpecialistsContext(
     .slice(0, 6)
     .map((s, idx) => {
       const todayHours = getTodayHoursSummary(s.weekdayDescriptions);
-      const rev = s.topReviews?.[0]?.text || s.reviews?.[0]?.text;
-      const revNote = rev ? ` | Review: "${rev.slice(0, 120)}"` : '';
+      const revList = (s.topReviews && s.topReviews.length > 0 ? s.topReviews : s.reviews) ?? [];
+      const revNote = revList
+        .slice(0, 2)
+        .map((r) => `"${r.text.slice(0, 120)}" (${r.rating}★)`)
+        .join(' / ');
       const open =
-        s.openNow === true ? 'Open' : s.openNow === false ? 'Closed' : 'Hours unknown';
-      return `#${idx + 1} ${s.name} (${s.specialty}) — ${s.rating?.toFixed(1) ?? 'N/A'}★ (${s.userRatingCount}), ${formatTravelTime(s.travelDurationSeconds)} ${modeLabel} (${formatDistance(s.distanceMeters)}), ${open}${todayHours ? `, today: ${todayHours}` : ''}${revNote}`;
+        s.openNow === true ? 'Open now' : s.openNow === false ? 'Closed now' : 'Hours unknown';
+      return `#${idx + 1} ${s.name} (${s.specialty}) — ${s.rating?.toFixed(1) ?? 'N/A'}★ (${s.userRatingCount} reviews), ${formatTravelTime(s.travelDurationSeconds)} ${modeLabel} (${formatDistance(s.distanceMeters)}), ${open}${todayHours ? `, today: ${todayHours}` : ''}${revNote ? ` | Reviews: ${revNote}` : ''}`;
     })
     .join('\n');
 }
@@ -239,62 +272,184 @@ export function buildProviderMapLinks(
   }));
 }
 
-function parseJsonObject<T>(rawText: string | undefined): Partial<T> {
-  const cleaned = (rawText ?? '{}')
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
-  return JSON.parse(cleaned || '{}') as Partial<T>;
-}
-
-export async function classifyIntentWithHydrogen(
-  ai: GoogleGenAI,
-  message: string,
-  hasExistingOrigin: boolean
-): Promise<ParsedIntent> {
-  const contents = `Classify this user message for a local specialist finder.
-Origin set: ${hasExistingOrigin ? 'yes' : 'no'}.
-Message: "${message}"`;
-
-  const response = await generateWithFallback(ai, contents, {
-    systemInstruction:
-      'Return action="set_location_only" if the user only shared a location, or action="search" if they want a specialist or place. Extract locationText, specialistQuery (translate symptoms to specialist type), and optional travelMode (DRIVE, WALK, or BICYCLE).',
-    responseMimeType: 'application/json',
-    responseSchema: {
-      type: Type.OBJECT,
-      properties: {
-        action: { type: Type.STRING },
-        specialistQuery: { type: Type.STRING, nullable: true },
-        locationText: { type: Type.STRING, nullable: true },
-        travelMode: { type: Type.STRING, nullable: true },
-        preferences: { type: Type.STRING, nullable: true },
+const ROUTE_AGENT_ACTION_DECLARATION: FunctionDeclaration = {
+  name: 'route_agent_action',
+  description:
+    'Route the user request to either set a starting location or run a local specialist search.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      action: {
+        type: Type.STRING,
+        description:
+          'Either "set_location_only" if the user only shared a location, or "search" if they want a local specialist or place.',
       },
-      required: ['action'],
+      specialistQuery: {
+        type: Type.STRING,
+        description:
+          'Concrete local specialist or place category to search on Google Maps (translate symptoms or needs into a specialist type). Omit if only setting a location.',
+      },
+      locationText: {
+        type: Type.STRING,
+        description: 'City, neighborhood, ZIP, or street address mentioned by the user, if any.',
+      },
+      travelMode: {
+        type: Type.STRING,
+        description: 'Optional travel mode: DRIVE, WALK, or BICYCLE.',
+      },
+      preferences: {
+        type: Type.STRING,
+        description: 'Optional user preferences such as open now, wheelchair accessible, or pediatric.',
+      },
     },
-  });
+    required: ['action'],
+  },
+};
 
-  const parsed = parseJsonObject<ParsedIntent>(response.text);
-  const normalizedAction =
-    parsed.action === 'set_location_only' && !parsed.specialistQuery
-      ? 'set_location_only'
-      : 'search';
+function normalizeParsedIntent(
+  raw: Record<string, unknown>,
+  fallbackMessage: string,
+  hasExistingOrigin: boolean
+): ParsedIntent {
+  const specialistQuery =
+    typeof raw.specialistQuery === 'string' ? raw.specialistQuery.trim() || null : null;
+  const locationText =
+    typeof raw.locationText === 'string' ? raw.locationText.trim() || null : null;
+  const preferences =
+    typeof raw.preferences === 'string' ? raw.preferences.trim() || null : null;
   const validMode =
-    parsed.travelMode === 'WALK' ||
-    parsed.travelMode === 'BICYCLE' ||
-    parsed.travelMode === 'DRIVE'
-      ? parsed.travelMode
+    raw.travelMode === 'WALK' || raw.travelMode === 'BICYCLE' || raw.travelMode === 'DRIVE'
+      ? raw.travelMode
       : undefined;
+
+  const normalizedAction =
+    raw.action === 'set_location_only' && !specialistQuery ? 'set_location_only' : 'search';
+
+  if (normalizedAction === 'search' && !specialistQuery && !locationText) {
+    return {
+      action: hasExistingOrigin ? 'search' : 'set_location_only',
+      specialistQuery: hasExistingOrigin ? fallbackMessage.trim() : null,
+      locationText: hasExistingOrigin ? null : fallbackMessage.trim(),
+      travelMode: validMode,
+      preferences,
+    };
+  }
 
   return {
     action: normalizedAction,
-    specialistQuery: parsed.specialistQuery?.trim() || null,
-    locationText: parsed.locationText?.trim() || null,
+    specialistQuery,
+    locationText,
     travelMode: validMode,
-    preferences: parsed.preferences?.trim() || null,
+    preferences,
   };
 }
 
+function parseKeyValueIntentLines(
+  text: string | undefined,
+  fallbackMessage: string,
+  hasExistingOrigin: boolean
+): ParsedIntent {
+  const fields: Record<string, string> = {};
+  for (const line of (text ?? '').split('\n')) {
+    const match = line.match(/^\s*(ACTION|SPECIALIST|LOCATION|MODE|PREFERENCES)\s*:\s*(.+?)\s*$/i);
+    if (!match) continue;
+    const key = match[1].toUpperCase();
+    const val = match[2].trim();
+    if (val && !/^(?:none|null|n\/a)$/i.test(val)) {
+      fields[key] = val;
+    }
+  }
+
+  return normalizeParsedIntent(
+    {
+      action: fields.ACTION?.toLowerCase(),
+      specialistQuery: fields.SPECIALIST,
+      locationText: fields.LOCATION,
+      travelMode: fields.MODE?.toUpperCase(),
+      preferences: fields.PREFERENCES,
+    },
+    fallbackMessage,
+    hasExistingOrigin
+  );
+}
+
+/**
+ * Classifies user intent using Gemini Grounding with Google Maps + hybrid Function Calling
+ * so geographic references and place needs are grounded in live Google Maps context.
+ */
+export async function classifyIntentWithHydrogen(
+  ai: GoogleGenAI,
+  message: string,
+  hasExistingOrigin: boolean,
+  origin: OriginLocation | null = null
+): Promise<ParsedIntent> {
+  const { persona, intentGuidance, entitySingular } = SHOWCASE_CONFIG.agent;
+  const contents = `Classify this user message for ${persona}.
+Origin set: ${hasExistingOrigin ? `yes (${origin?.formattedAddress ?? 'current'})` : 'no'}.
+Message: "${message}"`;
+
+  const systemInstruction = `You are ${persona}. ${intentGuidance} Always invoke the route_agent_action tool to return your routing decision: use action="set_location_only" if the user only shared a location, or action="search" if they want a local ${entitySingular} or place.`;
+
+  const hybridToolConfig = buildMapsToolConfig(
+    origin ? { lat: origin.lat, lng: origin.lng } : null,
+    true
+  );
+
+  try {
+    const response = await generateWithFallback(ai, contents, {
+      systemInstruction,
+      tools: [
+        { googleMaps: {} },
+        { functionDeclarations: [ROUTE_AGENT_ACTION_DECLARATION] },
+      ],
+      ...(hybridToolConfig ? { toolConfig: hybridToolConfig } : {}),
+    });
+
+    const call = response.functionCalls?.find((fc) => fc.name === 'route_agent_action') ??
+      response.functionCalls?.[0];
+    if (call?.args && typeof call.args === 'object') {
+      return normalizeParsedIntent(
+        call.args as Record<string, unknown>,
+        message,
+        hasExistingOrigin
+      );
+    }
+  } catch (err) {
+    const kind = classifyGeminiError(err);
+    if (kind === 'auth' || kind === 'quota') {
+      if (kind === 'quota') markMapsGroundingQuotaCooldown();
+      throw err;
+    }
+    // Fall through to pure Maps-grounded text classification if hybrid tool calling isn't supported.
+  }
+
+  const mapsOnlyToolConfig = buildMapsToolConfig(
+    origin ? { lat: origin.lat, lng: origin.lng } : null,
+    false
+  );
+  const fallbackResponse = await generateWithFallback(
+    ai,
+    `${contents}
+
+Respond ONLY with these lines (use "none" if absent):
+ACTION: search | set_location_only
+SPECIALIST: <category or none>
+LOCATION: <location or none>
+MODE: DRIVE | WALK | BICYCLE | none
+PREFERENCES: <preferences or none>`,
+    {
+      systemInstruction: `You are ${persona}. ${intentGuidance}`,
+      tools: [{ googleMaps: {} }],
+      ...(mapsOnlyToolConfig ? { toolConfig: mapsOnlyToolConfig } : {}),
+    }
+  );
+
+  return parseKeyValueIntentLines(fallbackResponse.text, message, hasExistingOrigin);
+}
+
+/**
+ * Primary search recommendation grounded directly in Google Maps via Gemini.
+ */
 export async function runHydrogenMapsGrounding(
   ai: GoogleGenAI,
   specialistQuery: string,
@@ -308,24 +463,24 @@ export async function runHydrogenMapsGrounding(
   const recentHistory = formatRecentHistory(history);
 
   const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}User: "${userMessage}"
-Specialty: ${specialistQuery}
+Category: ${specialistQuery}
 Origin: ${origin.formattedAddress} (${origin.lat.toFixed(5)}, ${origin.lng.toFixed(5)})
 Mode: ${modeLabel}
 
-Reply in 1 to 2 crisp sentences (under 38 words, plain text, no markdown). Name the standout pick balancing ratings and ${modeLabel} time, and let the map cards show the details.`;
+Reply in 2 crisp sentences (under 55 words, plain text, no markdown). Name the standout pick with its rating/review count, ${modeLabel} time, open hours if available, and one concrete takeaway from reviews to help the user decide.`;
 
   const response = await generateWithFallback(ai, prompt, {
+    systemInstruction: `You are ${SHOWCASE_CONFIG.agent.persona}. Keep answers concise, decision-focused, and grounded in Google Maps.`,
     tools: [{ googleMaps: {} }],
-    toolConfig: {
-      retrievalConfig: {
-        latLng: { latitude: origin.lat, longitude: origin.lng },
-      },
-    },
+    toolConfig: buildMapsToolConfig({ lat: origin.lat, lng: origin.lng }),
   });
 
   return extractGroundingResult(response);
 }
 
+/**
+ * Maps-grounded synthesis for comparisons, open-now filtering, sorting, and shortlist decisions.
+ */
 export async function runGroundedPlacesSynthesis(
   ai: GoogleGenAI,
   userMessage: string,
@@ -336,6 +491,8 @@ export async function runGroundedPlacesSynthesis(
 ): Promise<HydrogenMapsGroundingResult> {
   const recentHistory = formatRecentHistory(history);
   const context = formatSpecialistsContext(specialists, travelMode);
+  const coords = resolveGroundingCoords(origin, specialists);
+  const toolConfig = buildMapsToolConfig(coords);
 
   const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${origin?.formattedAddress || 'Not specified'}
 Mapped options:
@@ -343,12 +500,20 @@ ${context}
 
 User: "${userMessage}"
 
-Reply in 1 to 2 crisp sentences (under 38 words, plain text, no markdown). Highlight the clearest trade-off using real ratings, travel times, or hours above.`;
+Reply in 2 crisp sentences (under 55 words, plain text, no markdown). Compare ratings/review counts, travel times, today's open hours, and a specific review highlight so the user can decide confidently.`;
 
-  const response = await generateWithFallback(ai, prompt);
+  const response = await generateWithFallback(ai, prompt, {
+    systemInstruction: `You are ${SHOWCASE_CONFIG.agent.persona}. Ground every recommendation and comparison in live Google Maps data.`,
+    tools: [{ googleMaps: {} }],
+    ...(toolConfig ? { toolConfig } : {}),
+  });
+
   return extractGroundingResult(response);
 }
 
+/**
+ * Maps-grounded Q&A for place-specific questions (hours, reviews, suitability) and open-ended guidance.
+ */
 export async function runOpenEndedChatAnswer(
   ai: GoogleGenAI,
   userMessage: string,
@@ -359,51 +524,29 @@ export async function runOpenEndedChatAnswer(
 ): Promise<OpenEndedAnswerResult> {
   const recentHistory = formatRecentHistory(history);
   const context = formatSpecialistsContext(specialists, travelMode);
+  const coords = resolveGroundingCoords(origin, specialists);
+  const toolConfig = buildMapsToolConfig(coords);
 
   const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${origin?.formattedAddress || 'Not set'}
 ${context ? `Mapped options:\n${context}\n\n` : ''}User: "${userMessage}"
 
-Answer directly in 1 to 2 crisp sentences (under 40 words, plain prose, no markdown). Propose 2 to 3 short follow-up buttons (label <= 30 chars).`;
+Answer directly in 2 crisp sentences (under 55 words, plain prose, no markdown), citing real hours, ratings, and review takeaways whenever relevant.`;
 
   const response = await generateWithFallback(ai, prompt, {
-    responseMimeType: 'application/json',
-    responseSchema: {
-      type: Type.OBJECT,
-      properties: {
-        answer: { type: Type.STRING },
-        followUps: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              label: { type: Type.STRING },
-              prompt: { type: Type.STRING },
-            },
-            required: ['label', 'prompt'],
-          },
-        },
-      },
-      required: ['answer', 'followUps'],
-    },
+    systemInstruction: `You are ${SHOWCASE_CONFIG.agent.persona}. Answer concisely using live Google Maps grounding and the mapped options when present.`,
+    tools: [{ googleMaps: {} }],
+    ...(toolConfig ? { toolConfig } : {}),
   });
 
-  const parsed = parseJsonObject<{
-    answer?: string;
-    followUps?: Array<{ label?: string; prompt?: string }>;
-  }>(response.text);
-
-  const summary = (parsed.answer ?? '').replace(/\*\*([^*]+)\*\*/g, '$1').trim();
-  const suggestedFollowUps = (parsed.followUps ?? [])
-    .filter((f) => Boolean(f.label?.trim() && f.prompt?.trim()))
-    .slice(0, 3)
-    .map((f) => ({
-      label: f.label!.trim().slice(0, 34),
-      prompt: f.prompt!.trim(),
-    }));
+  const grounded = extractGroundingResult(response);
+  const groundingSources =
+    grounded.groundingSources.length > 0
+      ? grounded.groundingSources
+      : buildProviderMapLinks(specialists, grounded.summary, 3);
 
   return {
-    summary,
-    suggestedFollowUps,
-    groundingSources: buildProviderMapLinks(specialists, summary, 3),
+    summary: grounded.summary,
+    suggestedFollowUps: [],
+    groundingSources,
   };
 }

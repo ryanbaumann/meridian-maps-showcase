@@ -14,6 +14,7 @@ import type {
   ChatHistoryItem,
   MapViewMode,
   OriginLocation,
+  PlaceDetailsInsightsResponse,
   SortMode,
   Specialist,
   TravelMode,
@@ -21,7 +22,16 @@ import type {
 import { buildContextualFollowUps } from './utils/agentLogic.ts';
 import { rankSpecialists } from './utils/ranking.ts';
 
-const INITIAL_MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+function isUsableMapsApiKey(value: string | undefined | null): value is string {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  if (/^(?:MY_|YOUR_|PLACEHOLDER|REPLACE_|ENTER_)/i.test(trimmed)) return false;
+  return true;
+}
+
+const RAW_INITIAL_MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+const INITIAL_MAPS_KEY = isUsableMapsApiKey(RAW_INITIAL_MAPS_KEY) ? RAW_INITIAL_MAPS_KEY : '';
 
 function makeTurnId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -58,11 +68,13 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLocatingGps, setIsLocatingGps] = useState(false);
+  const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null);
   const [pendingClientFallback, setPendingClientFallback] =
     useState<PendingClientFallback | null>(null);
 
   const activeRequestAbortRef = useRef<AbortController | null>(null);
   const requestSeqRef = useRef(0);
+  const detailsFetchedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const onQuota = () => setQuotaExceeded(true);
@@ -82,7 +94,9 @@ export default function App() {
     fetch('/api/config')
       .then((r) => r.json())
       .then((data: { mapsApiKey?: string }) => {
-        if (active && data.mapsApiKey) setMapsApiKey(data.mapsApiKey);
+        if (active && isUsableMapsApiKey(data.mapsApiKey)) {
+          setMapsApiKey(data.mapsApiKey.trim());
+        }
       })
       .catch(() => {
         // Handled cleanly in map stage
@@ -616,12 +630,114 @@ export default function App() {
     setCamera3DView((prev) => (prev === 'free' || prev === 'orbit' ? 'corridor' : prev));
   }, []);
 
-  const handleInspectIn3D = useCallback((id: string) => {
-    setSelectedId(id);
-    setCamera3DView('street');
-    setMapViewMode('3d');
-    if (window.innerWidth < 1024) {
-      setMobileSnap('peek');
+  const handleRequestPlaceDetails = useCallback(async (placeId: string) => {
+    if (!placeId || detailsFetchedRef.current.has(placeId)) return;
+    detailsFetchedRef.current.add(placeId);
+    setLoadingDetailsId(placeId);
+    try {
+      const res = await fetch(`/api/place-details?placeId=${encodeURIComponent(placeId)}`);
+      if (res.status === 429) {
+        setQuotaExceeded(true);
+        return;
+      }
+      let details: PlaceDetailsInsightsResponse | null = null;
+      if (res.ok) {
+        const parsed = (await res.json()) as PlaceDetailsInsightsResponse;
+        if (parsed.quotaExceeded) {
+          setQuotaExceeded(true);
+          return;
+        }
+        if (!parsed.error) details = parsed;
+      }
+
+      let reviews = details?.reviews ?? [];
+      let editorialSummary = details?.editorialSummary;
+      let weekdayDescriptions = details?.weekdayDescriptions;
+
+      // If REST Place Details did not return reviews (e.g. key restriction), try Maps JS Place.fetchFields
+      if (
+        reviews.length === 0 &&
+        typeof window !== 'undefined' &&
+        window.google?.maps?.importLibrary
+      ) {
+        try {
+          const placesLib = (await window.google.maps.importLibrary(
+            'places'
+          )) as google.maps.PlacesLibrary;
+          if (placesLib?.Place) {
+            const place = new placesLib.Place({ id: placeId });
+            await place.fetchFields({
+              fields: ['reviews', 'editorialSummary', 'regularOpeningHours'],
+            });
+            const rawReviews = (place as unknown as {
+              reviews?: Array<{
+                authorAttribution?: { displayName?: string; uri?: string };
+                rating?: number;
+                text?: string;
+                relativePublishTimeDescription?: string;
+                googleMapsURI?: string;
+              }>;
+              editorialSummary?: string;
+              regularOpeningHours?: { weekdayDescriptions?: string[] };
+            });
+            if (Array.isArray(rawReviews.reviews) && rawReviews.reviews.length > 0) {
+              reviews = rawReviews.reviews
+                .filter((r) => Boolean(r.text?.trim()))
+                .slice(0, 5)
+                .map((r) => ({
+                  authorName: r.authorAttribution?.displayName?.trim() || 'Reviewer',
+                  authorUri: r.authorAttribution?.uri,
+                  rating: typeof r.rating === 'number' ? r.rating : 5,
+                  text: r.text!.trim(),
+                  relativePublishTime: r.relativePublishTimeDescription,
+                  googleMapsUri: r.googleMapsURI,
+                }));
+            }
+            if (!editorialSummary && typeof rawReviews.editorialSummary === 'string') {
+              editorialSummary = rawReviews.editorialSummary;
+            }
+            if (
+              (!weekdayDescriptions || weekdayDescriptions.length === 0) &&
+              rawReviews.regularOpeningHours?.weekdayDescriptions?.length
+            ) {
+              weekdayDescriptions = rawReviews.regularOpeningHours.weekdayDescriptions;
+            }
+          }
+        } catch {
+          // Best-effort client hydration; Places REST fields remain intact
+        }
+      }
+
+      setRawSpecialists((prev) =>
+        prev.map((item) =>
+          item.id === placeId
+            ? {
+                ...item,
+                rating: details?.rating ?? item.rating,
+                userRatingCount: details?.userRatingCount || item.userRatingCount,
+                reviews: reviews.length > 0 ? reviews : item.reviews,
+                topReviews:
+                  details?.topReviews && details.topReviews.length > 0
+                    ? details.topReviews
+                    : reviews.length > 0
+                      ? reviews.slice(0, 2)
+                      : item.topReviews,
+                ratingDistribution: details?.ratingDistribution ?? item.ratingDistribution,
+                editorialSummary: editorialSummary ?? item.editorialSummary,
+                weekdayDescriptions: weekdayDescriptions ?? item.weekdayDescriptions,
+                openNow: details?.openNow !== undefined ? details.openNow : item.openNow,
+                phoneNumber: details?.phoneNumber ?? item.phoneNumber,
+                websiteUri: details?.websiteUri ?? item.websiteUri,
+                googleMapsUri: details?.googleMapsUri ?? item.googleMapsUri,
+                detailsLoaded: true,
+              }
+            : item
+        )
+      );
+    } catch {
+      detailsFetchedRef.current.delete(placeId);
+    } finally {
+      setLoadingDetailsId((curr) => (curr === placeId ? null : curr));
     }
   }, []);
 
@@ -659,6 +775,8 @@ export default function App() {
     setPendingClientFallback(null);
     setIsLoading(false);
     setIsLocatingGps(false);
+    setLoadingDetailsId(null);
+    detailsFetchedRef.current.clear();
     setMobileSnap('half');
   }, []);
 
@@ -682,16 +800,16 @@ export default function App() {
             color: 'var(--status-warn)',
           }}
         >
-          Google Maps Platform quota reached. Visit{' '}
+          Google Maps Platform quota reached. If you are the app owner, visit{' '}
           <a
-            href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_git_agentskills_v1#quota_exceeded_errors"
+            href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
             target="_blank"
             rel="noopener noreferrer"
             className="underline font-semibold"
           >
             maps developer site
           </a>{' '}
-          to update your account.
+          for instructions to update your account.
         </div>
       )}
 
@@ -742,30 +860,26 @@ export default function App() {
               origin={origin}
               travelMode={travelMode}
               sortMode={sortMode}
-              mapViewMode={mapViewMode}
-              isOrbiting={camera3DView === 'orbit'}
               resolvedTheme={resolvedTheme}
               turns={turns}
               specialists={rankedSpecialists}
               selectedId={selectedId}
               syncedIds={syncedIds}
+              loadingDetailsId={loadingDetailsId}
               isLoading={isLoading}
               isLocatingGps={isLocatingGps}
               onToggleOpen={() => setSidebarOpen((v) => !v)}
               onChangeMobileSnap={setMobileSnap}
-              onToggleOrbit={() =>
-                setCamera3DView((prev) => (prev === 'orbit' ? 'street' : 'orbit'))
-              }
               onSubmitMessage={(msg) => runAgentRequest({ message: msg })}
               onUseGps={handleUseGps}
               onSetLocationText={handleSetLocationText}
               onChangeSortMode={setSortMode}
               onSelectSpecialist={handleSelectSpecialistFromSidebar}
-              onInspectIn3D={handleInspectIn3D}
               onHoverSpecialist={setHoveredId}
               onToggleSyncId={handleToggleSyncId}
               onSelectTopThree={handleSelectTopThree}
               onClearSynced={() => setSyncedIds([])}
+              onRequestPlaceDetails={handleRequestPlaceDetails}
               onReset={handleReset}
             />
           </APIProvider>

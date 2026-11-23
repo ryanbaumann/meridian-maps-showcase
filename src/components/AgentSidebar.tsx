@@ -10,7 +10,6 @@ import {
 import {
   ArrowRight,
   ArrowUp,
-  Box,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -21,7 +20,6 @@ import {
   LocateFixed,
   MapPin,
   Navigation,
-  Orbit,
   RotateCcw,
   Search,
   X,
@@ -30,7 +28,6 @@ import { SHOWCASE_CONFIG } from '../config/showcase.ts';
 import type { ResolvedTheme } from '../hooks/useTheme.ts';
 import type {
   AgentTurn,
-  MapViewMode,
   OriginLocation,
   SortMode,
   Specialist,
@@ -53,28 +50,26 @@ interface AgentSidebarProps {
   origin: OriginLocation | null;
   travelMode: TravelMode;
   sortMode: SortMode;
-  mapViewMode: MapViewMode;
-  isOrbiting: boolean;
   resolvedTheme: ResolvedTheme;
   turns: AgentTurn[];
   specialists: Specialist[];
   selectedId: string | null;
   syncedIds: string[];
+  loadingDetailsId: string | null;
   isLoading: boolean;
   isLocatingGps: boolean;
   onToggleOpen: () => void;
   onChangeMobileSnap: (snap: MobileSheetSnap) => void;
-  onToggleOrbit: () => void;
   onSubmitMessage: (message: string) => void;
   onUseGps: () => void;
   onSetLocationText: (locationText: string) => void;
   onChangeSortMode: (mode: SortMode) => void;
   onSelectSpecialist: (id: string) => void;
-  onInspectIn3D: (id: string) => void;
   onHoverSpecialist: (id: string | null) => void;
   onToggleSyncId: (id: string) => void;
   onSelectTopThree: () => void;
   onClearSynced: () => void;
+  onRequestPlaceDetails: (id: string) => void;
   onReset: () => void;
 }
 
@@ -90,28 +85,26 @@ export function AgentSidebar({
   origin,
   travelMode,
   sortMode,
-  mapViewMode,
-  isOrbiting,
   resolvedTheme,
   turns,
   specialists,
   selectedId,
   syncedIds,
+  loadingDetailsId,
   isLoading,
   isLocatingGps,
   onToggleOpen,
   onChangeMobileSnap,
-  onToggleOrbit,
   onSubmitMessage,
   onUseGps,
   onSetLocationText,
   onChangeSortMode,
   onSelectSpecialist,
-  onInspectIn3D,
   onHoverSpecialist,
   onToggleSyncId,
   onSelectTopThree,
   onClearSynced,
+  onRequestPlaceDetails,
   onReset,
 }: AgentSidebarProps) {
   const locationInputId = useId();
@@ -433,39 +426,6 @@ export function AgentSidebar({
             </p>
           </button>
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                if (mapViewMode === '3d') {
-                  onToggleOrbit();
-                } else {
-                  onInspectIn3D(selectedSpecialist.id);
-                }
-              }}
-              aria-pressed={mapViewMode === '3d' ? isOrbiting : undefined}
-              aria-label={
-                mapViewMode === '3d'
-                  ? `Orbit ${selectedSpecialist.name} in 3D`
-                  : `Inspect ${selectedSpecialist.name} in 3D`
-              }
-              className={`inline-flex items-center justify-center gap-1 min-h-[44px] px-3 text-xs font-medium rounded-lg border cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[var(--accent)] ${
-                mapViewMode === '3d' && isOrbiting
-                  ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
-                  : 'border-[var(--line)] text-[var(--ink)]'
-              }`}
-            >
-              {mapViewMode === '3d' ? (
-                <>
-                  <Orbit className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>{isOrbiting ? 'Stop' : 'Orbit'}</span>
-                </>
-              ) : (
-                <>
-                  <Box className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>3D</span>
-                </>
-              )}
-            </button>
             {selectedDirectionsHref && (
               <a
                 href={selectedDirectionsHref}
@@ -487,16 +447,25 @@ export function AgentSidebar({
         role="log"
         aria-live="polite"
         aria-label={`Conversation with ${SHOWCASE_CONFIG.brandName}`}
-        className={`flex-1 agent-scroll px-3 py-3.5 space-y-4 ${
+        className={`flex-1 agent-scroll px-4 py-4 ${
           mobileSnap === 'peek' ? 'hidden lg:block' : 'block'
         }`}
       >
         <maui-providers additional-attribution-ids={SHOWCASE_CONFIG.attributionIds.join(',')}>
-          {turns.length === 0 && (
-            <div className="space-y-3.5 px-0.5" data-testid="agent-welcome">
-              <h2 className="font-display text-lg font-bold text-[var(--ink)] leading-snug">
-                {SHOWCASE_CONFIG.headline}
-              </h2>
+          <div className="flex flex-col">
+            {turns.length === 0 && (
+              <div className="space-y-4" data-testid="agent-welcome">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-[var(--accent-text)]">
+                    {SHOWCASE_CONFIG.agent.roleLabel}
+                  </p>
+                  <h2 className="font-display text-lg font-bold text-[var(--ink)] leading-snug">
+                    {SHOWCASE_CONFIG.headline}
+                  </h2>
+                  <p className="text-xs text-[var(--muted)] leading-relaxed">
+                    {SHOWCASE_CONFIG.agent.tagline}
+                  </p>
+                </div>
 
               <ul role="list" className="space-y-1.5">
                 {SHOWCASE_CONFIG.starters.map((starter) => (
@@ -531,26 +500,39 @@ export function AgentSidebar({
             </div>
           )}
 
-          {turns.map((turn, idx) => {
-            const isLatestTurn = idx === turns.length - 1;
+            {turns.map((turn, idx) => {
+              const isLatestTurn = idx === turns.length - 1;
+              const isNewConversationTurn = turn.role === 'user' && idx > 0;
 
-            if (turn.role === 'user') {
-              return (
-                <div key={turn.id} className="flex justify-end">
-                  <div className="max-w-[85%] px-3 py-2 rounded-2xl rounded-br-sm bg-[var(--accent-soft)] text-[var(--ink)] border border-[var(--accent)]/30 text-xs sm:text-sm leading-snug">
-                    {turn.text}
+              if (turn.role === 'user') {
+                return (
+                  <div
+                    key={turn.id}
+                    data-testid={`user-turn-${idx}`}
+                    className={`flex justify-end ${
+                      isNewConversationTurn
+                        ? 'mt-7 pt-5 border-t border-[var(--line)]'
+                        : ''
+                    }`}
+                  >
+                    <div className="max-w-[85%] px-3.5 py-2 rounded-2xl rounded-br-sm bg-[var(--accent-soft)] text-[var(--ink)] border border-[var(--accent)]/30 text-xs sm:text-sm leading-snug">
+                      {turn.text}
+                    </div>
                   </div>
-                </div>
-              );
-            }
+                );
+              }
 
-            const turnSpecialists =
-              isLatestTurn && specialists.length > 0
-                ? specialists
-                : turn.specialistsSnapshot ?? specialists;
+              const turnSpecialists =
+                isLatestTurn && specialists.length > 0
+                  ? specialists
+                  : turn.specialistsSnapshot ?? specialists;
 
-            return (
-              <div key={turn.id} data-testid={`agent-turn-${idx}`} className="space-y-2.5">
+              return (
+                <div
+                  key={turn.id}
+                  data-testid={`agent-turn-${idx}`}
+                  className={`${idx > 0 ? 'mt-3.5' : ''} space-y-3`}
+                >
                 {turn.error ? (
                   <div
                     role="alert"
@@ -584,39 +566,79 @@ export function AgentSidebar({
                   </div>
                 )}
 
-                {/* Compact Google Maps Grounding Source Pills with required "Google Maps" attribution */}
+                {/* Compact Google Maps Grounding Sources + Review Snippet Links with required "Google Maps" attribution */}
                 {turn.groundingSources && turn.groundingSources.length > 0 && (() => {
                   const safeSources = turn.groundingSources
-                    .slice(0, 3)
-                    .map((src) => ({ ...src, safeHref: safeExternalUrl(src.uri) }))
+                    .slice(0, 4)
+                    .map((src) => ({
+                      ...src,
+                      safeHref: safeExternalUrl(src.uri),
+                      safeSnippets: (src.reviewSnippets ?? [])
+                        .map((snip) => ({
+                          text: snip.text,
+                          safeHref: safeExternalUrl(snip.uri) || safeExternalUrl(src.uri),
+                        }))
+                        .filter((snip): snip is { text: string; safeHref: string } =>
+                          Boolean(snip.text && snip.safeHref)
+                        ),
+                    }))
                     .filter((src): src is typeof src & { safeHref: string } => Boolean(src.safeHref));
                   if (safeSources.length === 0) return null;
+
+                  const reviewLinks = safeSources
+                    .flatMap((src) =>
+                      src.safeSnippets.map((snip) => ({
+                        placeTitle: src.title,
+                        text: snip.text,
+                        href: snip.safeHref,
+                      }))
+                    )
+                    .slice(0, 2);
+
                   return (
-                    <div
-                      className="flex flex-wrap items-center gap-1.5 px-0.5"
-                      data-testid="maps-links"
-                    >
-                      <span
-                        translate="no"
-                        className="text-[11px] font-medium text-[var(--muted)] whitespace-nowrap"
-                      >
-                        Google Maps
-                      </span>
-                      <ul role="list" className="flex flex-wrap items-center gap-1.5">
-                        {safeSources.map((src) => (
-                          <li key={src.safeHref}>
-                            <a
-                              href={src.safeHref}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-[28px] px-2.5 sm:px-2 py-0.5 rounded-md text-[11px] font-medium text-[var(--accent-text)] bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] border border-[var(--line)] transition-colors max-w-[190px] focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-                            >
-                              <span className="truncate">{src.title}</span>
-                              <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-75" aria-hidden="true" />
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
+                    <div className="space-y-1.5 px-0.5" data-testid="maps-links">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          translate="no"
+                          className="text-[11px] font-medium text-[var(--muted)] whitespace-nowrap"
+                        >
+                          Google Maps
+                        </span>
+                        <ul role="list" className="flex flex-wrap items-center gap-1.5">
+                          {safeSources.map((src) => (
+                            <li key={src.safeHref}>
+                              <a
+                                href={src.safeHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-[28px] px-2.5 sm:px-2 py-0.5 rounded-md text-[11px] font-medium text-[var(--accent-text)] bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] border border-[var(--line)] transition-colors max-w-[190px] focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                              >
+                                <span className="truncate">{src.title}</span>
+                                <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-75" aria-hidden="true" />
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      {reviewLinks.length > 0 && (
+                        <ul role="list" className="space-y-1">
+                          {reviewLinks.map((rev, rIdx) => (
+                            <li key={`${rev.href}-${rIdx}`}>
+                              <a
+                                href={rev.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group flex items-start gap-1.5 px-2 py-1 rounded-md text-[11px] leading-snug text-[var(--muted)] hover:text-[var(--ink)] bg-[var(--surface-subtle)]/70 border border-[var(--line)]/70 transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                              >
+                                <span className="line-clamp-2 flex-1">
+                                  “{rev.text}” — <span className="font-medium text-[var(--ink)]">{rev.placeTitle}</span>
+                                </span>
+                                <ExternalLink className="w-2.5 h-2.5 mt-0.5 shrink-0 opacity-70 group-hover:opacity-100" aria-hidden="true" />
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   );
                 })()}
@@ -632,9 +654,9 @@ export function AgentSidebar({
                     isLatestTurn={isLatestTurn}
                     selectedId={selectedId}
                     syncedSet={syncedSet}
+                    loadingDetailsId={loadingDetailsId}
                     isLocatingGps={isLocatingGps}
                     onFocusSpecialist={onSelectSpecialist}
-                    onInspectIn3D={onInspectIn3D}
                     onHoverSpecialist={onHoverSpecialist}
                     onToggleSyncId={onToggleSyncId}
                     onSelectTopThree={onSelectTopThree}
@@ -642,6 +664,7 @@ export function AgentSidebar({
                     onUseGps={onUseGps}
                     onSubmitLocationText={onSetLocationText}
                     onAskAboutClinic={handleAskAboutClinic}
+                    onRequestPlaceDetails={onRequestPlaceDetails}
                   />
                 )}
 
@@ -652,7 +675,7 @@ export function AgentSidebar({
                     <ul
                       role="list"
                       aria-label="Follow-up prompts"
-                      className="flex flex-wrap gap-1.5 pt-0.5"
+                      className="flex flex-wrap gap-1.5 pt-1"
                       data-testid="guided-followups"
                     >
                       {turn.suggestedFollowUps.slice(0, 3).map((item) => (
@@ -668,28 +691,29 @@ export function AgentSidebar({
                       ))}
                     </ul>
                   )}
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
 
-          {isLoading && (
-            <div className="space-y-2 pt-1" aria-busy="true">
-              <div className="flex items-center gap-2 text-xs font-medium text-[var(--muted)]">
-                <progress
-                  aria-label="Finding places and routes"
-                  className="loading-spinner"
-                />
-                <span>Finding places and routes...</span>
+            {isLoading && (
+              <div className="mt-4 space-y-2" aria-busy="true">
+                <div className="flex items-center gap-2 text-xs font-medium text-[var(--muted)]">
+                  <progress
+                    aria-label="Finding places and routes"
+                    className="loading-spinner"
+                  />
+                  <span>Finding places and routes...</span>
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="p-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] space-y-2"
+                >
+                  <div className="h-3 w-1/2 bg-[var(--surface-subtle)] rounded animate-pulse" />
+                  <div className="h-16 w-full bg-[var(--surface-subtle)] rounded-lg animate-pulse" />
+                </div>
               </div>
-              <div
-                aria-hidden="true"
-                className="p-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] space-y-2"
-              >
-                <div className="h-3 w-1/2 bg-[var(--surface-subtle)] rounded animate-pulse" />
-                <div className="h-16 w-full bg-[var(--surface-subtle)] rounded-lg animate-pulse" />
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </maui-providers>
         <div ref={threadEndRef} />
       </div>
