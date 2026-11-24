@@ -294,7 +294,7 @@
 }
 
 /* Standard thin scrollbars with safe scroll containment and legacy WebKit fallback */
-.agent-scroll {
+@utility agent-scroll {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -302,15 +302,18 @@
 }
 
 @supports not (scrollbar-color: auto) {
-  .agent-scroll::-webkit-scrollbar {
+  .agent-scroll::-webkit-scrollbar,
+  .lg\:agent-scroll::-webkit-scrollbar {
     width: 6px;
   }
 
-  .agent-scroll::-webkit-scrollbar-track {
+  .agent-scroll::-webkit-scrollbar-track,
+  .lg\:agent-scroll::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
   }
 
-  .agent-scroll::-webkit-scrollbar-thumb {
+  .agent-scroll::-webkit-scrollbar-thumb,
+  .lg\:agent-scroll::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
     border-radius: 9999px;
   }

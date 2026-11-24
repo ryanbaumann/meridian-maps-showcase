@@ -318,9 +318,9 @@ export function SynthesisSummaryCard({
                     </div>
                   </div>
 
-                  {/* Hours + Route / Details Actions */}
-                  <div className="flex items-center justify-between gap-2 pt-0.5">
-                    <div className="min-w-0 flex items-center gap-1 text-[11px] truncate">
+                  {/* Hours Line (dedicated full width so full opening hours never squeeze) */}
+                  {(specialist.openNow != null || pick.todayHours) && (
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] pt-0.5">
                       {specialist.openNow != null && (
                         <span
                           className="font-semibold shrink-0"
@@ -334,47 +334,48 @@ export function SynthesisSummaryCard({
                         </span>
                       )}
                       {pick.todayHours && (
-                        <span className="inline-flex items-center gap-0.5 text-[var(--muted)] truncate">
-                          <Clock className="w-2.5 h-2.5 shrink-0" aria-hidden="true" />
-                          <span className="truncate">{pick.todayHours}</span>
+                        <span className="inline-flex items-center gap-1 text-[var(--muted)]">
+                          <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+                          <span>{pick.todayHours}</span>
                         </span>
                       )}
                     </div>
+                  )}
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      {dirHref && (
-                        <a
-                          href={dirHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-1.5 text-[11px] font-medium text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)] rounded-md focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-                        >
-                          <Navigation className="w-3 h-3" aria-hidden="true" />
-                          <span>Route</span>
-                          <span className="sr-only"> to {specialist.name}</span>
-                        </a>
-                      )}
-                      {onAskAboutSpecialist && (
-                        <button
-                          type="button"
-                          onClick={() => onAskAboutSpecialist(specialist)}
-                          className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2 text-[11px] font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-md shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-                        >
-                          <MessageSquare className="w-3 h-3 text-[var(--muted)]" aria-hidden="true" />
-                          <span>Ask</span>
-                          <span className="sr-only"> agent about {specialist.name}</span>
-                        </button>
-                      )}
+                  {/* Quick Actions Row: Details, Ask, Route */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onInspectDetails(specialist.id)}
+                      className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2.5 text-[11px] font-semibold text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] border border-[var(--accent)]/35 rounded-md shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                    >
+                      <Info className="w-3 h-3" aria-hidden="true" />
+                      <span>Details</span>
+                      <span className="sr-only"> for {specialist.name}</span>
+                    </button>
+                    {onAskAboutSpecialist && (
                       <button
                         type="button"
-                        onClick={() => onInspectDetails(specialist.id)}
-                        className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2.5 text-[11px] font-semibold text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] border border-[var(--accent)]/35 rounded-md shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                        onClick={() => onAskAboutSpecialist(specialist)}
+                        className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2 text-[11px] font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-md shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                       >
-                        <Info className="w-3 h-3" aria-hidden="true" />
-                        <span>Details</span>
-                        <span className="sr-only"> for {specialist.name}</span>
+                        <MessageSquare className="w-3 h-3 text-[var(--muted)]" aria-hidden="true" />
+                        <span>Ask</span>
+                        <span className="sr-only"> agent about {specialist.name}</span>
                       </button>
-                    </div>
+                    )}
+                    {dirHref && (
+                      <a
+                        href={dirHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2 text-[11px] font-medium text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)] border border-transparent hover:border-[var(--line)] rounded-md shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                      >
+                        <Navigation className="w-3 h-3" aria-hidden="true" />
+                        <span>Route</span>
+                        <span className="sr-only"> to {specialist.name}</span>
+                      </a>
+                    )}
                   </div>
 
                   {/* Concise Review / Editorial Synthesis Line */}

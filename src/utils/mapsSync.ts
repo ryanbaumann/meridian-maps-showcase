@@ -11,6 +11,9 @@ export const MAPS_A2UI_CATALOG_ID = 'a2ui://maps-agentic-ui-catalog.json';
 /** Official Google Maps URLs maximum safe length (2,048 characters). */
 export const MAX_GOOGLE_MAPS_URL_LENGTH = 2048;
 
+/** Official Google Maps Shortlist Action maximum supported Place IDs. */
+export const MAX_GOOGLE_MAPS_SHORTLIST_PLACES = 20;
+
 const MAPS_URL_UTM_SOURCE = 'meridian_specialist_finder';
 
 /**
@@ -86,8 +89,49 @@ export function buildGoogleMapsListSearchUrl(
 }
 
 /**
+ * Builds an official Google Maps URLs Shortlist Action link:
+ * `https://www.google.com/maps/@?api=1&map_action=shortlist&place_ids=<id1>,<id2>,...`
+ *
+ * - Supports 1 to 20 valid Google Place IDs (deduplicated) within the 2,048-char limit.
+ * - Falls back to `buildGoogleMapsListSearchUrl` only if none of the selected items have
+ *   a valid Google Place ID.
+ */
+export function buildGoogleMapsShortlistUrl(
+  selectedSpecialists: Specialist[],
+  specialtyQuery?: string | null,
+  origin?: OriginLocation | null
+): string | null {
+  if (!selectedSpecialists || selectedSpecialists.length === 0) return null;
+
+  const uniquePlaceIds: string[] = [];
+  const seen = new Set<string>();
+  for (const item of selectedSpecialists) {
+    if (isValidGooglePlaceId(item.id) && !seen.has(item.id)) {
+      seen.add(item.id);
+      uniquePlaceIds.push(item.id);
+      if (uniquePlaceIds.length >= MAX_GOOGLE_MAPS_SHORTLIST_PLACES) break;
+    }
+  }
+
+  if (uniquePlaceIds.length === 0) {
+    return buildGoogleMapsListSearchUrl(specialtyQuery, origin ?? null, selectedSpecialists);
+  }
+
+  const basePrefix = 'https://www.google.com/maps/@?api=1&map_action=shortlist&place_ids=';
+  const utmSuffix = `&utm_source=${encodeURIComponent(MAPS_URL_UTM_SOURCE)}&utm_campaign=shortlist_action`;
+
+  let idsToUse = uniquePlaceIds;
+  let candidate = `${basePrefix}${idsToUse.map((id) => encodeURIComponent(id)).join(',')}${utmSuffix}`;
+  while (candidate.length > MAX_GOOGLE_MAPS_URL_LENGTH && idsToUse.length > 1) {
+    idsToUse = idsToUse.slice(0, -1);
+    candidate = `${basePrefix}${idsToUse.map((id) => encodeURIComponent(id)).join(',')}${utmSuffix}`;
+  }
+  return candidate;
+}
+
+/**
  * Formats shortlisted specialists into a clean shareable plain-text shortlist
- * with ratings, travel times, and direct Google Maps Place links.
+ * with an official Google Maps Shortlist link, ratings, travel times, and direct Place links.
  */
 export function buildShortlistShareText(
   origin: OriginLocation | null,
@@ -100,6 +144,10 @@ export function buildShortlistShareText(
   const header = origin
     ? `Shortlist near ${origin.label}:`
     : 'Specialist Shortlist:';
+  const shortlistUrl =
+    selectedSpecialists.length > 1
+      ? buildGoogleMapsShortlistUrl(selectedSpecialists, selectedSpecialists[0]?.specialty, origin)
+      : null;
   const lines = selectedSpecialists.map((s, idx) => {
     const mins =
       s.travelDurationSeconds != null
@@ -111,7 +159,9 @@ export function buildShortlistShareText(
     const detailLine = [meta, s.address].filter(Boolean).join(' — ');
     return `${idx + 1}. ${s.name}${detailLine ? ` (${detailLine})` : ''}${placeUrl ? `\n   ${placeUrl}` : ''}`;
   });
-  return [header, ...lines].join('\n');
+  return shortlistUrl
+    ? [header, `Google Maps Shortlist: ${shortlistUrl}`, ...lines].join('\n')
+    : [header, ...lines].join('\n');
 }
 
 /**

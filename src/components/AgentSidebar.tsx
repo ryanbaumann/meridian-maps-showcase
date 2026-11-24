@@ -39,7 +39,7 @@ import type {
 } from '../types.ts';
 import { prefersReducedMotion } from '../utils/camera.ts';
 import {
-  buildGoogleMapsListSearchUrl,
+  buildGoogleMapsShortlistUrl,
   buildGoogleMapsSyncUrl,
   buildPlaceDetailsUrl,
   buildPlaceDirectionsUrl,
@@ -168,9 +168,9 @@ export function AgentSidebar({
 
   const syncedSet = useMemo(() => new Set(syncedIds), [syncedIds]);
 
-  const shortlistListSearchUrl = useMemo(
-    () => buildGoogleMapsListSearchUrl(activeSpecialty, origin, syncedSpecialists),
-    [activeSpecialty, origin, syncedSpecialists]
+  const shortlistMapsUrl = useMemo(
+    () => buildGoogleMapsShortlistUrl(syncedSpecialists, activeSpecialty, origin),
+    [syncedSpecialists, activeSpecialty, origin]
   );
 
   const multiStopRouteUrl = useMemo(
@@ -1031,37 +1031,37 @@ export function AgentSidebar({
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-1.5">
+              {shortlistMapsUrl && (
+                <a
+                  href={shortlistMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="maps-sync-open-link"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] px-3 text-xs font-semibold text-[var(--accent-ink)] bg-[var(--accent)] hover:opacity-90 active:scale-[0.98] rounded-lg transition-opacity whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                >
+                  <span>Open shortlist in Maps</span>
+                  <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                </a>
+              )}
+
               <button
                 type="button"
                 onClick={handleCopyShortlist}
                 data-testid="maps-sync-copy-btn"
-                className="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] px-3 text-xs font-semibold text-[var(--accent-ink)] bg-[var(--accent)] hover:opacity-90 active:scale-[0.98] rounded-lg transition-opacity whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.98] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
               >
                 {copiedLink ? (
                   <>
-                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Copied shortlist</span>
+                    <Check className="w-3.5 h-3.5 text-[var(--accent-text)]" aria-hidden="true" />
+                    <span>Copied</span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Copy shortlist</span>
+                    <span>Copy</span>
                   </>
                 )}
               </button>
-
-              {shortlistListSearchUrl && (
-                <a
-                  href={shortlistListSearchUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-testid="maps-sync-open-link"
-                  className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.98] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-                >
-                  <span>Maps list</span>
-                  <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                </a>
-              )}
 
               {multiStopRouteUrl && (
                 <a

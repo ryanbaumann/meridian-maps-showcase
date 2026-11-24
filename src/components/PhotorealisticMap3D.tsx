@@ -72,6 +72,11 @@ interface Maps3dLibraryShape {
     RELATIVE_TO_GROUND?: string;
     RELATIVE_TO_MESH?: string;
   };
+  CollisionBehavior?: {
+    REQUIRED?: string;
+    REQUIRED_AND_HIDES_OPTIONAL?: string;
+    OPTIONAL_AND_HIDES_LOWER_PRIORITY?: string;
+  };
 }
 
 /**
@@ -266,16 +271,16 @@ export function PhotorealisticMap3D({
           )
         : 0;
 
-    // 1. Custom sculpted Meridian 3D Beacon hovering cleanly over the focused rooftop
+    // 1. Custom sculpted Meridian 3D Beacon seated cleanly on the focused rooftop below the elevated marker
     if (focusedId && focusedLat != null && focusedLng != null) {
       const BeaconCtor = ModelInteractive ?? ModelBasic!;
       const beaconModel = new BeaconCtor({
         src: SHOWCASE_CONFIG.models.destinationBeaconUrl,
-        position: { lat: focusedLat, lng: focusedLng, altitude: 4 },
+        position: { lat: focusedLat, lng: focusedLng, altitude: 2 },
         altitudeMode: meshMode,
         // glTF +Y up -> Maps 3D +Z up via tilt: 270
         orientation: { heading: routeHeading, tilt: 270, roll: 0 },
-        scale: 9.0,
+        scale: 6.0,
       });
 
       const onBeaconClick = () => {
@@ -309,7 +314,7 @@ export function PhotorealisticMap3D({
     };
   }, [maps3dLib, originLat, originLng, focusedId, focusedLat, focusedLng]);
 
-  // Sync high-contrast custom 3D markers independently of async route polyline & .glb resolution
+  // Sync high-contrast custom SVG 3D markers with crisp text outline colors & collision priority
   useEffect(() => {
     const map3d = map3dRef.current;
     if (!map3d || !maps3dLib) return;
@@ -320,43 +325,302 @@ export function PhotorealisticMap3D({
     const MarkerInteractive = maps3dLib.Marker3DInteractiveElement;
     const MarkerBasic = maps3dLib.Marker3DElement;
     const PinElement = markerLib?.PinElement;
-    const relativeMode = maps3dLib.AltitudeMode?.RELATIVE_TO_GROUND ?? 'RELATIVE_TO_GROUND';
+    const meshMode =
+      maps3dLib.AltitudeMode?.RELATIVE_TO_MESH ??
+      maps3dLib.AltitudeMode?.RELATIVE_TO_GROUND ??
+      'RELATIVE_TO_MESH';
+    const requiredHidesOptional =
+      maps3dLib.CollisionBehavior?.REQUIRED_AND_HIDES_OPTIONAL ?? 'REQUIRED_AND_HIDES_OPTIONAL';
+    const optionalHidesLower =
+      maps3dLib.CollisionBehavior?.OPTIONAL_AND_HIDES_LOWER_PRIORITY ??
+      'OPTIONAL_AND_HIDES_LOWER_PRIORITY';
     const syncedSet = new Set(syncedIds);
+    const svgNS = 'http://www.w3.org/2000/svg';
 
-    // Custom high-contrast obsidian + teal compass SVG template for Start marker (never default red)
-    const buildOriginSvgTemplate = (): HTMLTemplateElement | null => {
+    const createOutlinedText = (options: {
+      x: number;
+      y: number;
+      text: string;
+      fill: string;
+      stroke: string;
+      strokeWidth: number;
+      fontSize: number;
+      anchor?: 'start' | 'middle' | 'end';
+      fontWeight?: string;
+    }): SVGTextElement => {
+      const el = document.createElementNS(svgNS, 'text');
+      el.setAttribute('x', String(options.x));
+      el.setAttribute('y', String(options.y));
+      el.setAttribute('fill', options.fill);
+      el.setAttribute('stroke', options.stroke);
+      el.setAttribute('stroke-width', String(options.strokeWidth));
+      el.setAttribute('stroke-linejoin', 'round');
+      el.setAttribute('paint-order', 'stroke fill');
+      el.setAttribute('font-family', 'Inter, system-ui, -apple-system, sans-serif');
+      el.setAttribute('font-size', String(options.fontSize));
+      el.setAttribute('font-weight', options.fontWeight ?? '800');
+      el.setAttribute('text-anchor', options.anchor ?? 'middle');
+      el.setAttribute('dominant-baseline', 'central');
+      el.textContent = options.text;
+      return el;
+    };
+
+    // 1. Origin ("Start") marker: high-contrast compass emblem + outlined START label
+    const buildOriginGraphicTemplate = (): HTMLTemplateElement | null => {
       if (typeof document === 'undefined') return null;
-      const svgNS = 'http://www.w3.org/2000/svg';
       const tpl = document.createElement('template');
       const svg = document.createElementNS(svgNS, 'svg');
       svg.setAttribute('xmlns', svgNS);
-      svg.setAttribute('width', '40');
-      svg.setAttribute('height', '40');
-      svg.setAttribute('viewBox', '0 0 40 40');
+      svg.setAttribute('width', '92');
+      svg.setAttribute('height', '68');
+      svg.setAttribute('viewBox', '0 0 92 68');
 
-      const outerRing = document.createElementNS(svgNS, 'circle');
-      outerRing.setAttribute('cx', '20');
-      outerRing.setAttribute('cy', '20');
-      outerRing.setAttribute('r', '18');
-      outerRing.setAttribute('fill', '#0f172a');
-      outerRing.setAttribute('stroke', '#ffffff');
-      outerRing.setAttribute('stroke-width', '3.5');
+      // Outlined START pill badge
+      const pill = document.createElementNS(svgNS, 'rect');
+      pill.setAttribute('x', '16');
+      pill.setAttribute('y', '2');
+      pill.setAttribute('width', '60');
+      pill.setAttribute('height', '22');
+      pill.setAttribute('rx', '11');
+      pill.setAttribute('fill', '#0f172a');
+      pill.setAttribute('stroke', '#ffffff');
+      pill.setAttribute('stroke-width', '2.5');
+
+      const label = createOutlinedText({
+        x: 46,
+        y: 13.5,
+        text: 'START',
+        fill: '#ffffff',
+        stroke: '#020617',
+        strokeWidth: 3.5,
+        fontSize: 11.5,
+      });
+
+      // Vertical connector stem to compass bullseye
+      const stem = document.createElementNS(svgNS, 'line');
+      stem.setAttribute('x1', '46');
+      stem.setAttribute('y1', '24');
+      stem.setAttribute('x2', '46');
+      stem.setAttribute('y2', '32');
+      stem.setAttribute('stroke', '#ffffff');
+      stem.setAttribute('stroke-width', '3');
+
+      // High-contrast obsidian + teal compass bullseye
+      const outerHalo = document.createElementNS(svgNS, 'circle');
+      outerHalo.setAttribute('cx', '46');
+      outerHalo.setAttribute('cy', '47');
+      outerHalo.setAttribute('r', '17');
+      outerHalo.setAttribute('fill', '#0f172a');
+      outerHalo.setAttribute('stroke', '#ffffff');
+      outerHalo.setAttribute('stroke-width', '3.5');
 
       const tealRing = document.createElementNS(svgNS, 'circle');
-      tealRing.setAttribute('cx', '20');
-      tealRing.setAttribute('cy', '20');
-      tealRing.setAttribute('r', '10');
+      tealRing.setAttribute('cx', '46');
+      tealRing.setAttribute('cy', '47');
+      tealRing.setAttribute('r', '9.5');
       tealRing.setAttribute('fill', '#14b8a6');
       tealRing.setAttribute('stroke', '#ffffff');
       tealRing.setAttribute('stroke-width', '2');
 
       const core = document.createElementNS(svgNS, 'circle');
-      core.setAttribute('cx', '20');
-      core.setAttribute('cy', '20');
-      core.setAttribute('r', '4');
+      core.setAttribute('cx', '46');
+      core.setAttribute('cy', '47');
+      core.setAttribute('r', '3.5');
       core.setAttribute('fill', '#ffffff');
 
-      svg.append(outerRing, tealRing, core);
+      svg.append(stem, pill, label, outerHalo, tealRing, core);
+      tpl.content.append(svg);
+      return tpl;
+    };
+
+    // 2. Specialist marker: custom SVG basic graphics + bold text outline color for legibility over 3D buildings
+    const buildSpecialistGraphicTemplate = (params: {
+      rank: number;
+      timeText: string;
+      ratingText: string | null;
+      isSelected: boolean;
+      isSynced: boolean;
+      isTopThree: boolean;
+    }): HTMLTemplateElement | null => {
+      if (typeof document === 'undefined') return null;
+      const { rank, timeText, ratingText, isSelected, isSynced, isTopThree } = params;
+      const tpl = document.createElement('template');
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('xmlns', svgNS);
+
+      // Compact high-contrast circular pin with outlined rank for ranks #4+ (unselected & not shortlisted)
+      if (!isSelected && !isSynced && !isTopThree) {
+        const w = 52;
+        const h = 58;
+        svg.setAttribute('width', String(w));
+        svg.setAttribute('height', String(h));
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+        // Pointer triangle with white outline
+        const pointer = document.createElementNS(svgNS, 'polygon');
+        pointer.setAttribute('points', '19,38 33,38 26,51');
+        pointer.setAttribute('fill', '#0f172a');
+        pointer.setAttribute('stroke', '#ffffff');
+        pointer.setAttribute('stroke-width', '2.5');
+        pointer.setAttribute('stroke-linejoin', 'round');
+
+        // Outer badge circle
+        const circle = document.createElementNS(svgNS, 'circle');
+        circle.setAttribute('cx', '26');
+        circle.setAttribute('cy', '22');
+        circle.setAttribute('r', '18');
+        circle.setAttribute('fill', '#0f172a');
+        circle.setAttribute('stroke', '#ffffff');
+        circle.setAttribute('stroke-width', '3');
+
+        // Subtle inner sky accent ring
+        const innerRing = document.createElementNS(svgNS, 'circle');
+        innerRing.setAttribute('cx', '26');
+        innerRing.setAttribute('cy', '22');
+        innerRing.setAttribute('r', '13.5');
+        innerRing.setAttribute('fill', 'none');
+        innerRing.setAttribute('stroke', '#38bdf8');
+        innerRing.setAttribute('stroke-width', '1.5');
+        innerRing.setAttribute('stroke-opacity', '0.85');
+
+        // Ground anchor dot
+        const dot = document.createElementNS(svgNS, 'circle');
+        dot.setAttribute('cx', '26');
+        dot.setAttribute('cy', '54');
+        dot.setAttribute('r', '3');
+        dot.setAttribute('fill', '#38bdf8');
+        dot.setAttribute('stroke', '#020617');
+        dot.setAttribute('stroke-width', '1.5');
+
+        const rankLabel = createOutlinedText({
+          x: 26,
+          y: 22.5,
+          text: String(rank),
+          fill: '#ffffff',
+          stroke: '#020617',
+          strokeWidth: 4,
+          fontSize: rank >= 10 ? 14 : 16,
+        });
+
+        svg.append(pointer, circle, innerRing, rankLabel, dot);
+        tpl.content.append(svg);
+        return tpl;
+      }
+
+      // Rich callout graphic badge for Selected, Shortlisted, and Top 3 picks
+      const showRating = isSelected && Boolean(ratingText);
+      const primaryText = isSynced && !isSelected ? `✓ ${timeText}` : timeText;
+      const textChars = primaryText.length + (showRating && ratingText ? ratingText.length + 2 : 0);
+      const badgeW = Math.max(isSelected ? 132 : 108, 46 + textChars * 8.6);
+      const badgeH = isSelected ? 40 : 34;
+      const totalW = Math.ceil(badgeW + 12);
+      const totalH = badgeH + 22;
+      const cx = totalW / 2;
+
+      svg.setAttribute('width', String(totalW));
+      svg.setAttribute('height', String(totalH));
+      svg.setAttribute('viewBox', `0 0 ${totalW} ${totalH}`);
+
+      const bgFill = isSelected ? '#0f766e' : isSynced ? '#1e1b4b' : '#0f172a';
+      const borderStroke = isSelected ? '#ffffff' : isSynced ? '#fbbf24' : '#ffffff';
+      const textStroke = isSelected ? '#042f2e' : '#020617';
+      const textFill = isSynced && !isSelected ? '#fef3c7' : '#ffffff';
+
+      // Outer dark halo behind badge + pointer for crisp separation over bright concrete roofs
+      const haloRect = document.createElementNS(svgNS, 'rect');
+      haloRect.setAttribute('x', '4');
+      haloRect.setAttribute('y', '3');
+      haloRect.setAttribute('width', String(totalW - 8));
+      haloRect.setAttribute('height', String(badgeH));
+      haloRect.setAttribute('rx', String(badgeH / 2));
+      haloRect.setAttribute('fill', 'none');
+      haloRect.setAttribute('stroke', '#020617');
+      haloRect.setAttribute('stroke-width', '5.5');
+      haloRect.setAttribute('stroke-opacity', '0.7');
+
+      // Pointer caret
+      const tipY = badgeH + 14;
+      const pointer = document.createElementNS(svgNS, 'polygon');
+      pointer.setAttribute('points', `${cx - 8},${badgeH + 1} ${cx + 8},${badgeH + 1} ${cx},${tipY}`);
+      pointer.setAttribute('fill', bgFill);
+      pointer.setAttribute('stroke', borderStroke);
+      pointer.setAttribute('stroke-width', '2.5');
+      pointer.setAttribute('stroke-linejoin', 'round');
+
+      // Main pill graphic
+      const rect = document.createElementNS(svgNS, 'rect');
+      rect.setAttribute('x', '4');
+      rect.setAttribute('y', '3');
+      rect.setAttribute('width', String(totalW - 8));
+      rect.setAttribute('height', String(badgeH));
+      rect.setAttribute('rx', String(badgeH / 2));
+      rect.setAttribute('fill', bgFill);
+      rect.setAttribute('stroke', borderStroke);
+      rect.setAttribute('stroke-width', isSelected ? '3' : '2.5');
+
+      // Rank medallion circle on left
+      const medalR = isSelected ? 13 : 11.5;
+      const medalCx = 4 + badgeH / 2;
+      const medalCy = 3 + badgeH / 2;
+      const medal = document.createElementNS(svgNS, 'circle');
+      medal.setAttribute('cx', String(medalCx));
+      medal.setAttribute('cy', String(medalCy));
+      medal.setAttribute('r', String(medalR));
+      medal.setAttribute(
+        'fill',
+        isSelected ? '#ffffff' : isSynced ? '#fbbf24' : '#14b8a6'
+      );
+      medal.setAttribute('stroke', textStroke);
+      medal.setAttribute('stroke-width', '1.5');
+
+      const medalText = createOutlinedText({
+        x: medalCx,
+        y: medalCy + 0.5,
+        text: String(rank),
+        fill: '#0f172a',
+        stroke: '#ffffff',
+        strokeWidth: isSelected ? 0 : 1.2,
+        fontSize: isSelected ? 14 : 12.5,
+      });
+
+      // Crisp outlined travel time (+ gold star rating on selected marker)
+      const labelStartX = medalCx + medalR + 8;
+      const timeLabel = createOutlinedText({
+        x: labelStartX,
+        y: medalCy + 0.5,
+        text: primaryText,
+        fill: textFill,
+        stroke: textStroke,
+        strokeWidth: 3.8,
+        fontSize: isSelected ? 14 : 12.5,
+        anchor: 'start',
+      });
+
+      // Ground anchor beacon dot right under the caret
+      const anchorDot = document.createElementNS(svgNS, 'circle');
+      anchorDot.setAttribute('cx', String(cx));
+      anchorDot.setAttribute('cy', String(totalH - 3.5));
+      anchorDot.setAttribute('r', isSelected ? '3.5' : '2.8');
+      anchorDot.setAttribute('fill', isSelected ? '#2dd4bf' : isSynced ? '#fbbf24' : '#ffffff');
+      anchorDot.setAttribute('stroke', '#020617');
+      anchorDot.setAttribute('stroke-width', '1.5');
+
+      svg.append(haloRect, pointer, rect, medal, medalText, timeLabel, anchorDot);
+
+      if (showRating && ratingText) {
+        const ratingLabel = createOutlinedText({
+          x: totalW - 14,
+          y: medalCy + 0.5,
+          text: ratingText,
+          fill: '#fde68a',
+          stroke: '#042f2e',
+          strokeWidth: 3.5,
+          fontSize: 13,
+          anchor: 'end',
+        });
+        svg.append(ratingLabel);
+      }
+
       tpl.content.append(svg);
       return tpl;
     };
@@ -364,16 +628,17 @@ export function PhotorealisticMap3D({
     if (origin && (MarkerBasic || MarkerInteractive)) {
       const Ctor = MarkerBasic ?? MarkerInteractive!;
       const originMarker = new Ctor({
-        position: { lat: origin.lat, lng: origin.lng, altitude: 26 },
-        altitudeMode: relativeMode,
-        label: 'Start',
+        position: { lat: origin.lat, lng: origin.lng, altitude: 48 },
+        altitudeMode: meshMode,
+        title: `Start: ${origin.label}`,
         extruded: true,
+        collisionBehavior: requiredHidesOptional,
         drawsWhenOccluded: true,
         sizePreserved: true,
-        zIndex: 80,
+        zIndex: 900,
       });
 
-      const originSvgTpl = MarkerBasic ? buildOriginSvgTemplate() : null;
+      const originSvgTpl = buildOriginGraphicTemplate();
       if (originSvgTpl) {
         originMarker.appendChild(originSvgTpl);
       } else if (PinElement) {
@@ -399,58 +664,52 @@ export function PhotorealisticMap3D({
       const Ctor = MarkerInteractive ?? MarkerBasic;
       if (!Ctor) return;
 
-      const labelPrefix = isSynced ? `✓ #${rank}` : `#${rank}`;
+      const timeText = formatTravelTime(specialist.travelDurationSeconds);
+      const ratingText =
+        specialist.rating != null ? `★${specialist.rating.toFixed(1)}` : null;
 
+      // Elevate the active destination high above surrounding buildings & its rooftop beacon
+      // with an extruded stem and REQUIRED_AND_HIDES_OPTIONAL so it is never occluded or hidden.
       const marker = new Ctor({
         position: {
           lat: specialist.location.lat,
           lng: specialist.location.lng,
-          altitude: isSelected ? 44 : isSynced ? 34 : isTopThree ? 28 : 22,
+          altitude: isSelected ? 105 : isSynced ? 52 : isTopThree ? 42 : 28,
         },
-        altitudeMode: relativeMode,
-        label: `${labelPrefix} · ${formatTravelTime(specialist.travelDurationSeconds)}`,
-        title: specialist.name,
+        altitudeMode: meshMode,
+        title: `#${rank} ${specialist.name} · ${timeText}`,
         extruded: true,
-        drawsWhenOccluded: isSelected || isSynced || isTopThree,
+        collisionBehavior: isSelected ? requiredHidesOptional : optionalHidesLower,
+        drawsWhenOccluded: isSelected,
         sizePreserved: true,
-        zIndex: isSelected ? 100 : isSynced ? 70 : Math.max(20, 60 - index),
+        zIndex: isSelected
+          ? 1000
+          : isSynced
+            ? 200 - index
+            : isTopThree
+              ? 120 - index
+              : Math.max(20, 60 - index),
       });
 
-      // Always attach a high-contrast custom PinElement so Maps 3D never falls back to default red pins
-      if (PinElement) {
-        const pin = new PinElement(
-          isSelected
-            ? {
-                background: '#0d9488',
-                borderColor: '#ffffff',
-                glyphColor: '#ffffff',
-                glyphText: String(rank),
-                scale: 1.45,
-              }
-            : isSynced
-              ? {
-                  background: '#1e1b4b',
-                  borderColor: '#fbbf24',
-                  glyphColor: '#fbbf24',
-                  glyphText: `✓${rank}`,
-                  scale: 1.25,
-                }
-              : isTopThree
-                ? {
-                    background: '#0f172a',
-                    borderColor: '#ffffff',
-                    glyphColor: '#2dd4bf',
-                    glyphText: String(rank),
-                    scale: 1.2,
-                  }
-                : {
-                    background: '#1e293b',
-                    borderColor: '#f8fafc',
-                    glyphColor: '#ffffff',
-                    glyphText: String(rank),
-                    scale: 1.0,
-                  }
-        );
+      const svgTpl = buildSpecialistGraphicTemplate({
+        rank,
+        timeText,
+        ratingText,
+        isSelected,
+        isSynced,
+        isTopThree,
+      });
+
+      if (svgTpl) {
+        marker.appendChild(svgTpl);
+      } else if (PinElement) {
+        const pin = new PinElement({
+          background: isSelected ? '#0d9488' : isSynced ? '#1e1b4b' : '#0f172a',
+          borderColor: isSynced ? '#fbbf24' : '#ffffff',
+          glyphColor: isSelected ? '#ffffff' : '#2dd4bf',
+          glyphText: String(rank),
+          scale: isSelected ? 1.4 : 1.1,
+        });
         marker.appendChild(pin);
       }
 

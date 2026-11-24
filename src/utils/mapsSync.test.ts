@@ -5,6 +5,7 @@ import {
   buildA2uiSpecialistsBatchMessages,
   buildGoogleMapsListSearchUrl,
   buildGoogleMapsSearchUrl,
+  buildGoogleMapsShortlistUrl,
   buildGoogleMapsSyncUrl,
   buildPlaceDetailsUrl,
   buildPlaceDirectionsUrl,
@@ -12,6 +13,7 @@ import {
   buildShortlistShareText,
   isValidGooglePlaceId,
   MAPS_A2UI_CATALOG_ID,
+  MAX_GOOGLE_MAPS_SHORTLIST_PLACES,
   MAX_GOOGLE_MAPS_URL_LENGTH,
 } from './mapsSync.ts';
 import type { OriginLocation, Specialist } from '../types.ts';
@@ -145,9 +147,45 @@ describe('Universal Google Maps URLs builders', () => {
     assert.equal(listUrl.searchParams.get('utm_campaign'), 'shortlist_search');
   });
 
-  it('buildShortlistShareText formats shortlisted places with individual Google Maps links', () => {
+  it('buildGoogleMapsShortlistUrl builds official map_action=shortlist URL with comma-separated Place IDs', () => {
+    const urlStr = buildGoogleMapsShortlistUrl([PLACE_A, PLACE_B, PLACE_C], 'dentist', SF_ORIGIN);
+    assert.ok(urlStr);
+    const url = new URL(urlStr);
+    assert.equal(url.origin + url.pathname, 'https://www.google.com/maps/@');
+    assert.equal(url.searchParams.get('api'), '1');
+    assert.equal(url.searchParams.get('map_action'), 'shortlist');
+    assert.equal(
+      url.searchParams.get('place_ids'),
+      `${PLACE_A.id},${PLACE_B.id},${PLACE_C.id}`
+    );
+    assert.equal(url.searchParams.get('utm_source'), 'meridian_specialist_finder');
+    assert.equal(url.searchParams.get('utm_campaign'), 'shortlist_action');
+  });
+
+  it('buildGoogleMapsShortlistUrl deduplicates IDs, caps at 20 places, and falls back when no valid Place IDs exist', () => {
+    const manyPlaces: Specialist[] = Array.from({ length: 25 }, (_, idx) => ({
+      ...PLACE_A,
+      id: `ChIJShortlistTestId${String(idx).padStart(2, '0')}ABCDEFGH`,
+    }));
+    const cappedStr = buildGoogleMapsShortlistUrl([manyPlaces[0], ...manyPlaces], 'dentist', SF_ORIGIN);
+    assert.ok(cappedStr);
+    assert.ok(cappedStr.length <= MAX_GOOGLE_MAPS_URL_LENGTH);
+    const parsedIds = new URL(cappedStr).searchParams.get('place_ids')?.split(',') ?? [];
+    assert.equal(parsedIds.length, MAX_GOOGLE_MAPS_SHORTLIST_PLACES);
+
+    const syntheticOnly: Specialist[] = [
+      { ...PLACE_A, id: 'place-0-37.78' },
+      { ...PLACE_B, id: 'place-1-37.79' },
+    ];
+    const fallbackStr = buildGoogleMapsShortlistUrl(syntheticOnly, 'dentist', SF_ORIGIN);
+    assert.ok(fallbackStr);
+    assert.equal(new URL(fallbackStr).pathname, '/maps/search/');
+  });
+
+  it('buildShortlistShareText formats shortlisted places with official shortlist URL and individual Google Maps links', () => {
     const text = buildShortlistShareText(SF_ORIGIN, [PLACE_A, PLACE_B], 'DRIVE');
     assert.ok(text.includes('Shortlist near San Francisco, CA:'));
+    assert.ok(text.includes('map_action=shortlist'));
     assert.ok(text.includes('1. Bay Dental Studio'));
     assert.ok(text.includes(PLACE_A.googleMapsUri!));
     assert.ok(text.includes('2. Pacific Smiles Dental'));

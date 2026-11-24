@@ -135,7 +135,7 @@ export function GenUiBlockRenderer({
     return (
       <div
         data-testid="genui-provider-spotlight"
-        className="lg:max-h-[400px] lg:agent-scroll rounded-xl"
+        className="lg:max-h-[400px] lg:overflow-y-auto lg:agent-scroll rounded-xl"
       >
         <PlaceDetailView
           specialist={clinic}
@@ -174,7 +174,7 @@ export function GenUiBlockRenderer({
       <div
         ref={windowScrollRef}
         data-testid="genui-comparison"
-        className="lg:max-h-[460px] lg:agent-scroll rounded-xl"
+        className="lg:max-h-[460px] lg:overflow-y-auto lg:agent-scroll rounded-xl"
       >
         {activeComparisonSynthesis && (
           <SynthesisSummaryCard
@@ -287,7 +287,7 @@ export function GenUiBlockRenderer({
       <div
         ref={windowScrollRef}
         data-testid="options-scroll-window"
-        className="lg:max-h-[540px] lg:agent-scroll space-y-2 rounded-xl"
+        className="lg:max-h-[540px] lg:overflow-y-auto lg:agent-scroll rounded-xl"
       >
         {activeSynthesis && (
           <SynthesisSummaryCard
@@ -304,19 +304,19 @@ export function GenUiBlockRenderer({
             onAskAboutSpecialist={onAskAboutClinic}
           />
         )}
-
-        {orderedCards.length > 3 && (
-          <button
-            type="button"
-            onClick={() => setShowAllCards((v) => !v)}
-            className="w-full min-h-[44px] sm:min-h-[34px] text-xs font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
-          >
-            {showAllCards
-              ? 'Show top 3 only'
-              : `Show ${hiddenCount} more options`}
-          </button>
-        )}
       </div>
+
+      {orderedCards.length > 3 && (
+        <button
+          type="button"
+          onClick={() => setShowAllCards((v) => !v)}
+          className="w-full min-h-[44px] sm:min-h-[36px] text-xs font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+        >
+          {showAllCards
+            ? 'Show top 3 only'
+            : `Show ${hiddenCount} more options`}
+        </button>
+      )}
     </div>
   );
 }
