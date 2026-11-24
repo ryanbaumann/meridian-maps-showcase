@@ -1,5 +1,12 @@
 import { SHOWCASE_CONFIG } from '../config/showcase.ts';
-import type { LatLng, ParsedIntent, SortMode, Specialist, TravelMode } from '../types';
+import type {
+  LatLng,
+  ParsedIntent,
+  SortMode,
+  Specialist,
+  SpecialistScoreBreakdown,
+  TravelMode,
+} from '../types';
 
 /**
  * Parses Google Routes/Places duration strings like "597s" or "1240.5s" into integer seconds.
@@ -93,10 +100,14 @@ export function computeBayesianRating(rating: number | null, reviewCount: number
 }
 
 /**
- * Computes a 0–100 composite score blending Bayesian rating quality (55%)
- * and travel-time convenience (45%).
+ * Computes a transparent 0–100 score breakdown blending Google rating quality (45%),
+ * live travel time (35%), and route/proximity distance (20%).
  */
-export function computeCompositeScore(specialist: Specialist, maxDurationSeconds: number): number {
+export function computeScoreBreakdown(
+  specialist: Specialist,
+  maxDurationSeconds: number,
+  maxDistanceMeters = 8000
+): SpecialistScoreBreakdown {
   const bayesRating = computeBayesianRating(specialist.rating, specialist.userRatingCount);
   // Map 3.0–5.0 Bayesian rating cleanly into 0–1
   const ratingNorm = Math.max(0, Math.min(1, (bayesRating - 3.0) / 2.0));
@@ -104,13 +115,47 @@ export function computeCompositeScore(specialist: Specialist, maxDurationSeconds
   let timeNorm = 0.5;
   if (specialist.travelDurationSeconds != null && Number.isFinite(specialist.travelDurationSeconds)) {
     const ceiling = Math.max(600, maxDurationSeconds); // at least 10-min reference window
-    // Shorter travel time => closer to 1.0
     timeNorm = Math.max(0, Math.min(1, 1 - specialist.travelDurationSeconds / (ceiling * 1.15)));
   }
 
-  const { rating: ratingWeight, travelTime: travelWeight } = SHOWCASE_CONFIG.agent.rankingWeights;
-  const raw = (ratingNorm * ratingWeight + timeNorm * travelWeight) * 100;
-  return Math.round(raw);
+  let distanceNorm = timeNorm;
+  if (specialist.distanceMeters != null && Number.isFinite(specialist.distanceMeters)) {
+    const distCeiling = Math.max(3200, maxDistanceMeters); // at least 2-mi reference window
+    distanceNorm = Math.max(0, Math.min(1, 1 - specialist.distanceMeters / (distCeiling * 1.15)));
+  }
+
+  const { rating: ratingWeight, travelTime: travelWeight, distance: distanceWeight } =
+    SHOWCASE_CONFIG.agent.rankingWeights;
+
+  const ratingScore = Math.round(ratingNorm * 100);
+  const travelTimeScore = Math.round(timeNorm * 100);
+  const distanceScore = Math.round(distanceNorm * 100);
+  const overall = Math.round(
+    (ratingNorm * ratingWeight + timeNorm * travelWeight + distanceNorm * distanceWeight) * 100
+  );
+
+  return {
+    overall,
+    ratingScore,
+    travelTimeScore,
+    distanceScore,
+    weights: {
+      rating: ratingWeight,
+      travelTime: travelWeight,
+      distance: distanceWeight,
+    },
+  };
+}
+
+/**
+ * Computes a 0–100 composite score blending Bayesian rating quality, travel time, and distance.
+ */
+export function computeCompositeScore(
+  specialist: Specialist,
+  maxDurationSeconds: number,
+  maxDistanceMeters = 8000
+): number {
+  return computeScoreBreakdown(specialist, maxDurationSeconds, maxDistanceMeters).overall;
 }
 
 /**
@@ -124,16 +169,28 @@ export function rankSpecialists(specialists: Specialist[], sortMode: SortMode): 
     .filter((d): d is number => d != null && Number.isFinite(d));
   const maxDuration = validDurations.length > 0 ? Math.max(...validDurations) : 1800;
 
-  const scored = specialists.map((item) => ({
-    ...item,
-    compositeScore: computeCompositeScore(item, maxDuration),
-  }));
+  const validDistances = specialists
+    .map((s) => s.distanceMeters)
+    .filter((d): d is number => d != null && Number.isFinite(d));
+  const maxDistance = validDistances.length > 0 ? Math.max(...validDistances) : 8000;
+
+  const scored = specialists.map((item) => {
+    const breakdown = computeScoreBreakdown(item, maxDuration, maxDistance);
+    return {
+      ...item,
+      compositeScore: breakdown.overall,
+      scoreBreakdown: breakdown,
+    };
+  });
 
   return scored.sort((a, b) => {
     if (sortMode === 'fastest') {
       const aTime = a.travelDurationSeconds ?? Number.POSITIVE_INFINITY;
       const bTime = b.travelDurationSeconds ?? Number.POSITIVE_INFINITY;
       if (aTime !== bTime) return aTime - bTime;
+      const aDist = a.distanceMeters ?? Number.POSITIVE_INFINITY;
+      const bDist = b.distanceMeters ?? Number.POSITIVE_INFINITY;
+      if (aDist !== bDist) return aDist - bDist;
       return computeBayesianRating(b.rating, b.userRatingCount) - computeBayesianRating(a.rating, a.userRatingCount);
     }
 
@@ -146,7 +203,7 @@ export function rankSpecialists(specialists: Specialist[], sortMode: SortMode): 
       return aTime - bTime;
     }
 
-    // Default: balanced composite score
+    // Default: balanced composite score (Google rating + travel time + distance)
     const scoreDiff = (b.compositeScore ?? 0) - (a.compositeScore ?? 0);
     if (scoreDiff !== 0) return scoreDiff;
     const aTime = a.travelDurationSeconds ?? Number.POSITIVE_INFINITY;

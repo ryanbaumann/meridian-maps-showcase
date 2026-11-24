@@ -15,7 +15,6 @@ import {
   runGroundedPlacesSynthesis,
   runHydrogenMapsGrounding,
   runOpenEndedChatAnswer,
-  type HydrogenMapsGroundingResult,
 } from './server/geminiAgent.ts';
 import {
   fetchPlaceDetailsInsights,
@@ -63,12 +62,88 @@ import {
   sanitizeOrigin,
   sanitizeSpecialists,
 } from './src/utils/sanitize.ts';
+import { buildRankedSynthesis } from './src/utils/synthesis.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Best-effort parallel Place Details enrichment for the top 3 ranked specialists so
+ * Gemini reasoning and the visual synthesis card have live reviews, star breakdowns,
+ * editorial summaries, and 7-day hours before generating the verdict.
+ */
+async function enrichTopSpecialistsWithDetails(
+  specialists: Specialist[],
+  mapsKey: string,
+  referer: string,
+  timeoutMs = 2200
+): Promise<Specialist[]> {
+  if (!mapsKey || specialists.length === 0) return specialists;
+  const topCandidates = specialists
+    .slice(0, 3)
+    .filter(
+      (s) =>
+        isValidGooglePlaceId(s.id) &&
+        !s.detailsLoaded &&
+        (!s.reviews || s.reviews.length === 0 || !s.editorialSummary || !s.weekdayDescriptions?.length)
+    );
+  if (topCandidates.length === 0) return specialists;
+
+  const fetchAll = Promise.allSettled(
+    topCandidates.map(async (s) => {
+      const result = await fetchPlaceDetailsInsights(s.id, mapsKey, referer);
+      return { id: s.id, result };
+    })
+  );
+
+  const settled = await Promise.race([
+    fetchAll,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+
+  if (!settled) return specialists;
+
+  const byId = new Map<
+    string,
+    Awaited<ReturnType<typeof fetchPlaceDetailsInsights>>['payload']
+  >();
+  for (const outcome of settled) {
+    if (
+      outcome.status === 'fulfilled' &&
+      outcome.value.result.status === 200 &&
+      outcome.value.result.payload
+    ) {
+      byId.set(outcome.value.id, outcome.value.result.payload);
+    }
+  }
+  if (byId.size === 0) return specialists;
+
+  return specialists.map((item) => {
+    const details = byId.get(item.id);
+    if (!details) return item;
+    return {
+      ...item,
+      rating: details.rating ?? item.rating,
+      userRatingCount: details.userRatingCount || item.userRatingCount,
+      reviews: details.reviews.length > 0 ? details.reviews : item.reviews,
+      topReviews: details.topReviews.length > 0 ? details.topReviews : item.topReviews,
+      ratingDistribution: details.ratingDistribution ?? item.ratingDistribution,
+      editorialSummary: details.editorialSummary ?? item.editorialSummary,
+      weekdayDescriptions:
+        details.weekdayDescriptions && details.weekdayDescriptions.length > 0
+          ? details.weekdayDescriptions
+          : item.weekdayDescriptions,
+      openNow: details.openNow !== undefined ? details.openNow : item.openNow,
+      phoneNumber: details.phoneNumber ?? item.phoneNumber,
+      websiteUri: details.websiteUri ?? item.websiteUri,
+      googleMapsUri: details.googleMapsUri ?? item.googleMapsUri,
+      detailsLoaded: true,
+    };
+  });
 }
 
 async function startServer() {
@@ -337,6 +412,13 @@ async function startServer() {
             groundingSources,
             geminiNotice,
             focusSpecialistId: null,
+            synthesis: buildRankedSynthesis({
+              specialists: reordered,
+              specialistQuery: activeSpecialty,
+              originLabel: providedOrigin?.label,
+              sortMode: conversational.sortMode,
+              travelMode: activeTravelMode,
+            }),
             genUiBlock: {
               type: 'place_cards',
               specialistIds: reordered.slice(0, 4).map((s) => s.id),
@@ -472,6 +554,13 @@ async function startServer() {
             groundingSources,
             geminiNotice,
             focusSpecialistId: null,
+            synthesis: buildRankedSynthesis({
+              specialists: targets,
+              specialistQuery: activeSpecialty,
+              originLabel: providedOrigin?.label,
+              sortMode: 'balanced',
+              travelMode: activeTravelMode,
+            }),
             genUiBlock: {
               type: 'comparison',
               specialistIds: targets.map((s) => s.id),
@@ -753,42 +842,24 @@ async function startServer() {
         } satisfies AgentSearchResponse);
       }
 
-      // 5. Parallel Places API (New) routing search + Gemini Maps Grounding
-      const geminiReady = Boolean(ai) && isGeminiApiReady();
-      const shouldTryGrounding = geminiReady && isMapsGroundingReady();
-      const [placesOutcome, groundingOutcome] = await Promise.allSettled([
-        searchPlacesWithRoutingServer(
+      // 5. Fetch live Places API (New) results with routing summaries, enrich top 3 place details,
+      //    then synthesize a decision verdict grounded in Google Maps + real weighted scores.
+      let specialists: Specialist[] = [];
+      let needsClientPlacesFallback = false;
+
+      try {
+        specialists = await searchPlacesWithRoutingServer(
           specialistQuery,
           resolvedOrigin!,
           activeTravelMode,
           mapsKey,
           referer
-        ),
-        shouldTryGrounding
-          ? runHydrogenMapsGrounding(
-              ai!,
-              specialistQuery,
-              resolvedOrigin!,
-              activeTravelMode,
-              userText || `${specialistQuery} near ${resolvedOrigin!.label}`,
-              safeHistory
-            )
-          : Promise.resolve<HydrogenMapsGroundingResult>({
-              summary: '',
-              groundingSources: [],
-            }),
-      ]);
-
-      let specialists: Specialist[] = [];
-      let needsClientPlacesFallback = false;
-
-      if (placesOutcome.status === 'fulfilled') {
-        specialists = placesOutcome.value;
-      } else {
-        if (placesOutcome.reason instanceof QuotaExceededError) {
+        );
+      } catch (err) {
+        if (err instanceof QuotaExceededError) {
           return res.status(429).json({
             quotaExceeded: true,
-            error: placesOutcome.reason.message,
+            error: err.message,
           });
         }
         needsClientPlacesFallback = true;
@@ -801,44 +872,62 @@ async function startServer() {
       } else if (/\b(?:highest\s+rated|top\s+rated|best\s+rated)\b/i.test(userText)) {
         resolvedSortMode = 'rating';
         specialists = rankSpecialists(specialists, 'rating');
+      } else if (specialists.length > 0) {
+        specialists = rankSpecialists(specialists, 'balanced');
+      }
+
+      // Enrich top 3 options with Place Details (reviews, star breakdown, editorial summary, weekly hours)
+      if (specialists.length > 0 && mapsKey) {
+        specialists = await enrichTopSpecialistsWithDetails(specialists, mapsKey, referer, 2200);
       }
 
       let agentSummary = '';
       let groundingSources: GroundingSource[] = [];
       let geminiFailure: unknown = null;
 
-      if (groundingOutcome.status === 'fulfilled') {
-        agentSummary = groundingOutcome.value.summary;
-        groundingSources = groundingOutcome.value.groundingSources;
-      } else {
-        geminiFailure = groundingOutcome.reason;
-        if (classifyGeminiError(geminiFailure) === 'quota' || isInvalidArgumentError(geminiFailure)) {
-          markMapsGroundingQuotaCooldown();
-        }
-      }
-
-      // If Maps Grounding skipped or failed, synthesize directly over the live Places results
-      if (!agentSummary && ai && isGeminiApiReady() && specialists.length > 0) {
+      const geminiReady = Boolean(ai) && isGeminiApiReady();
+      if (geminiReady && specialists.length > 0) {
         try {
           const synth = await runGroundedPlacesSynthesis(
-            ai,
+            ai!,
             userText || `${specialistQuery} near ${resolvedOrigin!.label}`,
             specialists,
             resolvedOrigin,
             activeTravelMode,
             safeHistory,
-            { useMapsGrounding: false }
+            { useMapsGrounding: isMapsGroundingReady() }
           );
           if (synth.summary) {
             agentSummary = synth.summary;
-            geminiFailure = null;
           }
-          if (groundingSources.length === 0 && synth.groundingSources.length > 0) {
+          if (synth.groundingSources.length > 0) {
             groundingSources = synth.groundingSources;
           }
         } catch (synthErr) {
+          if (classifyGeminiError(synthErr) === 'quota' || isInvalidArgumentError(synthErr)) {
+            markMapsGroundingQuotaCooldown();
+          }
           if (isHardQuotaExhausted(synthErr)) markGeminiQuotaCooldown();
           geminiFailure = synthErr;
+        }
+      } else if (geminiReady && specialists.length === 0 && isMapsGroundingReady()) {
+        try {
+          const grounded = await runHydrogenMapsGrounding(
+            ai!,
+            specialistQuery,
+            resolvedOrigin!,
+            activeTravelMode,
+            userText || `${specialistQuery} near ${resolvedOrigin!.label}`,
+            safeHistory
+          );
+          agentSummary = grounded.summary;
+          groundingSources = grounded.groundingSources;
+        } catch (err) {
+          geminiFailure = err;
+          if (classifyGeminiError(err) === 'quota' || isInvalidArgumentError(err)) {
+            markMapsGroundingQuotaCooldown();
+          }
+          if (isHardQuotaExhausted(err)) markGeminiQuotaCooldown();
         }
       }
 
@@ -862,10 +951,8 @@ async function startServer() {
       const openFiltered = askedOpenOnly
         ? specialists.filter((s) => s.openNow === true)
         : [];
-      const genUiIds =
-        openFiltered.length > 0
-          ? openFiltered.map((s) => s.id)
-          : specialists.map((s) => s.id);
+      const activeDisplayList = openFiltered.length > 0 ? openFiltered : specialists;
+      const genUiIds = activeDisplayList.map((s) => s.id);
 
       const formattedQueryTitle = /^top[\s-]/i.test(specialistQuery)
         ? `${specialistQuery.charAt(0).toUpperCase()}${specialistQuery.slice(1)}`
@@ -879,6 +966,14 @@ async function startServer() {
               title: openFiltered.length > 0 ? `Open ${specialistQuery}` : formattedQueryTitle,
             }
           : undefined;
+
+      const synthesis = buildRankedSynthesis({
+        specialists: activeDisplayList,
+        specialistQuery,
+        originLabel: resolvedOrigin?.label,
+        sortMode: resolvedSortMode,
+        travelMode: activeTravelMode,
+      });
 
       if (groundingSources.length === 0 && specialists.length > 0) {
         groundingSources = buildProviderMapLinks(specialists, agentSummary, 3);
@@ -898,6 +993,7 @@ async function startServer() {
             ? buildA2uiSpecialistsBatchMessages(`specialists_${Date.now()}`, specialists, 'horizontal')
             : [],
         genUiBlock,
+        synthesis,
         focusSpecialistId: null,
         suggestedFollowUps: buildContextualFollowUps({
           origin: resolvedOrigin,

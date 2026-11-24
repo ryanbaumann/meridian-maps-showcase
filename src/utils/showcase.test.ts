@@ -35,7 +35,12 @@ describe('SHOWCASE_CONFIG agent blueprint', () => {
     assert.ok(agent.noOriginFollowUps.length >= 3);
     assert.ok(agent.originFollowUpTemplates.length >= 3);
     assert.equal(
-      Math.round((agent.rankingWeights.rating + agent.rankingWeights.travelTime) * 100),
+      Math.round(
+        (agent.rankingWeights.rating +
+          agent.rankingWeights.travelTime +
+          agent.rankingWeights.distance) *
+          100
+      ),
       100
     );
     assert.deepEqual([...SHOWCASE_CONFIG.attributionIds], [

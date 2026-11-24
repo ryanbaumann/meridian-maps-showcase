@@ -441,10 +441,12 @@ export function buildDeterministicAgentReply(opts: {
     const higherRated = (a.rating ?? 0) >= (b.rating ?? 0) ? a : b;
     const fasterHours = formatHoursSnippet(faster);
     const ratedHours = formatHoursSnippet(higherRated);
+    const fasterDist = formatDistance(faster.distanceMeters);
+    const ratedDist = formatDistance(higherRated.distanceMeters);
     if (faster.id === higherRated.id) {
-      return `${faster.name} leads on both travel (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}) and rating (${formatRatingSummary(faster)})${fasterHours ? `, ${fasterHours}` : ''}.`;
+      return `${faster.name} leads overall (${faster.compositeScore ?? 'top'} score) with ${formatRatingSummary(faster)}, ${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}${fasterDist ? ` (${fasterDist})` : ''}${fasterHours ? `, ${fasterHours}` : ''}.`;
     }
-    return `${faster.name} is quickest (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}, ${formatDistance(faster.distanceMeters)}${fasterHours ? `, ${fasterHours}` : ''}), while ${higherRated.name} leads on rating (${formatRatingSummary(higherRated)}${ratedHours ? `, ${ratedHours}` : ''}).`;
+    return `${faster.name} is quickest (${formatTravelTime(faster.travelDurationSeconds)} ${modeWord}${fasterDist ? `, ${fasterDist}` : ''}${fasterHours ? `, ${fasterHours}` : ''}), while ${higherRated.name} leads on rating (${formatRatingSummary(higherRated)}${ratedDist ? `, ${ratedDist}` : ''}${ratedHours ? `, ${ratedHours}` : ''}).`;
   }
 
   if (action === 'provider_qa' && focused) {
@@ -465,16 +467,29 @@ export function buildDeterministicAgentReply(opts: {
           ? 'highest rating'
           : 'best overall balance';
     const hoursPart = formatHoursSnippet(top);
-    return `Ranked by ${modeDesc}. ${top.name} is #1 at ${formatRatingSummary(top)} and ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}${hoursPart ? ` (${hoursPart})` : ''}.`;
+    const distPart = formatDistance(top.distanceMeters);
+    return `Ranked by ${modeDesc}. ${top.name} is #1 at ${formatRatingSummary(top)}, ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}${distPart ? ` (${distPart})` : ''}${hoursPart ? `, ${hoursPart}` : ''}.`;
   }
 
   if (specialists.length > 0) {
     const top = specialists[0];
+    const runnerUp = specialists[1];
     const openCount = specialists.filter((s) => s.openNow === true).length;
     const openSuffix = openCount > 0 ? ` (${openCount} open now)` : '';
     const hoursPart = formatHoursSnippet(top);
-    const rev = getReviewHighlight(top, 95);
-    return `Found ${specialists.length} ${specialistQuery || SHOWCASE_CONFIG.agent.entitySingular} options near ${origin?.label || 'you'}${openSuffix}. Top pick ${top.name} holds ${formatRatingSummary(top)}, ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}${hoursPart ? `, ${hoursPart}` : ''}.${rev ? ` Reviewers note: "${rev}"` : ''}`;
+    const topDist = formatDistance(top.distanceMeters);
+    const rev = getReviewHighlight(top, 85);
+    const scorePart = top.compositeScore != null ? ` (${top.compositeScore}/100 weighted)` : '';
+
+    let secondSentence = '';
+    if (rev) {
+      secondSentence = ` Reviewers note: "${rev}"`;
+    } else if (runnerUp) {
+      const rDist = formatDistance(runnerUp.distanceMeters);
+      secondSentence = ` Runner-up ${runnerUp.name} offers ${formatRatingSummary(runnerUp)} at ${formatTravelTime(runnerUp.travelDurationSeconds)} ${modeWord}${rDist ? ` (${rDist})` : ''}.`;
+    }
+
+    return `${top.name} leads ${specialists.length} ${specialistQuery || SHOWCASE_CONFIG.agent.entitySingular} options near ${origin?.label || 'you'}${openSuffix}${scorePart}: ${formatRatingSummary(top)}, ${formatTravelTime(top.travelDurationSeconds)} ${modeWord}${topDist ? ` (${topDist})` : ''}${hoursPart ? `, ${hoursPart}` : ''}.${secondSentence}`;
   }
 
   return `No ${specialistQuery || SHOWCASE_CONFIG.agent.entitySingular} matches near ${origin?.label || 'that area'}. Try a wider search.`;

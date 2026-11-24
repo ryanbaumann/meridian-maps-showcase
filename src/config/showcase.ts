@@ -9,7 +9,8 @@ import type { LatLng, SuggestedPrompt } from '../types.ts';
  * to any local-discovery domain (healthcare specialists, dining, EV charging, retail, travel, etc.).
  */
 export const SHOWCASE_CONFIG = {
-  brandName: 'Meridian',
+  brandName: 'Real-World Reasoning Agent Demo - Specialist Finder',
+  mobileBrandName: 'Specialist Finder',
   headline: 'Find the right specialist nearby.',
   composerPlaceholder: 'Enter an address, or try "dentist in SF"...',
   originReadyPlaceholder: 'Dentist, dermatologist, optometrist...',
@@ -32,8 +33,9 @@ export const SHOWCASE_CONFIG = {
     intentGuidance:
       'Translate symptoms, needs, or preferences into a concrete local specialist query, and extract any location or travel mode.',
     rankingWeights: {
-      rating: 0.55,
-      travelTime: 0.45,
+      rating: 0.45,
+      travelTime: 0.35,
+      distance: 0.2,
     },
     knownCategories: [
       'dentist',

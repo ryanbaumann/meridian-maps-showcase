@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   computeBayesianRating,
   computeCompositeScore,
+  computeScoreBreakdown,
   estimateTravelSeconds,
   formatDistance,
   formatTravelTime,
@@ -142,4 +143,29 @@ test('computeCompositeScore returns bounded 0-100 integers', () => {
   const score = computeCompositeScore(s, 1800);
   assert.ok(score >= 0 && score <= 100);
   assert.equal(Number.isInteger(score), true);
+});
+
+test('computeScoreBreakdown explicitly weights Google rating, travel time, and distance', () => {
+  const closer = makeSpecialist({
+    id: 'closer',
+    rating: 4.8,
+    userRatingCount: 250,
+    travelDurationSeconds: 480,
+    distanceMeters: 1200,
+  });
+  const farther = makeSpecialist({
+    id: 'farther',
+    rating: 4.8,
+    userRatingCount: 250,
+    travelDurationSeconds: 480,
+    distanceMeters: 7800,
+  });
+
+  const closerBreakdown = computeScoreBreakdown(closer, 1200, 8000);
+  const fartherBreakdown = computeScoreBreakdown(farther, 1200, 8000);
+
+  assert.equal(closerBreakdown.ratingScore, fartherBreakdown.ratingScore);
+  assert.equal(closerBreakdown.travelTimeScore, fartherBreakdown.travelTimeScore);
+  assert.ok(closerBreakdown.distanceScore > fartherBreakdown.distanceScore);
+  assert.ok(closerBreakdown.overall > fartherBreakdown.overall);
 });

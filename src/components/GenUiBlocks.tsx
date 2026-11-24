@@ -12,6 +12,7 @@ import type { ResolvedTheme } from '../hooks/useTheme.ts';
 import type {
   GenUiBlock,
   OriginLocation,
+  RankedSynthesisResult,
   SortMode,
   Specialist,
   TravelMode,
@@ -19,12 +20,15 @@ import type {
 import { getTodayHoursSummary } from '../utils/agentLogic.ts';
 import { toGoogleMapsUrlTravelMode } from '../utils/mapsSync.ts';
 import { formatDistance, formatTravelTime } from '../utils/ranking.ts';
+import { buildRankedSynthesis } from '../utils/synthesis.ts';
 import { safeExternalUrl } from '../utils/url.ts';
 import { A2uiPlaceCard } from './A2uiPlaceCard.tsx';
 import { PlaceDetailView } from './PlaceDetailView.tsx';
+import { SynthesisSummaryCard } from './SynthesisSummaryCard.tsx';
 
 interface GenUiBlockRendererProps {
   block: GenUiBlock;
+  synthesis?: RankedSynthesisResult;
   specialists: Specialist[];
   origin: OriginLocation | null;
   travelMode: TravelMode;
@@ -54,6 +58,7 @@ function getTravelModeShortLabel(mode: TravelMode): string {
 
 export function GenUiBlockRenderer({
   block,
+  synthesis,
   specialists,
   origin,
   travelMode,
@@ -150,7 +155,7 @@ export function GenUiBlockRenderer({
     return (
       <div
         data-testid="genui-provider-spotlight"
-        className="max-h-[400px] agent-scroll rounded-xl"
+        className="lg:max-h-[400px] lg:agent-scroll rounded-xl"
       >
         <PlaceDetailView
           specialist={clinic}
@@ -177,12 +182,33 @@ export function GenUiBlockRenderer({
       ? items.find((item) => item.id === inspectedId) ?? null
       : null;
 
+    const activeComparisonSynthesis =
+      synthesis ??
+      buildRankedSynthesis({
+        specialists: items,
+        specialistQuery: items[0]?.specialty,
+        originLabel: origin?.label,
+        sortMode,
+        travelMode,
+      });
+
     return (
-      <div
-        ref={windowScrollRef}
-        data-testid="genui-comparison"
-        className="max-h-[380px] agent-scroll rounded-xl border border-[var(--line)] bg-[var(--surface)]"
-      >
+      <div className="space-y-2.5">
+        {!inspectedClinic && activeComparisonSynthesis && (
+          <SynthesisSummaryCard
+            synthesis={activeComparisonSynthesis}
+            specialists={items}
+            selectedId={selectedId}
+            travelMode={travelMode}
+            onSelectSpecialist={onFocusSpecialist}
+            onInspectDetails={openDetailInWindow}
+          />
+        )}
+        <div
+          ref={windowScrollRef}
+          data-testid="genui-comparison"
+          className="lg:max-h-[380px] lg:agent-scroll rounded-xl border border-[var(--line)] bg-[var(--surface)]"
+        >
         {inspectedClinic ? (
           <PlaceDetailView
             specialist={inspectedClinic}
@@ -344,6 +370,7 @@ export function GenUiBlockRenderer({
             </ul>
           </>
         )}
+        </div>
       </div>
     );
   }
@@ -368,8 +395,29 @@ export function GenUiBlockRenderer({
     ? orderedCards.find((item) => item.id === inspectedId) ?? null
     : null;
 
+  const activeSynthesis = isLatestTurn
+    ? buildRankedSynthesis({
+        specialists: orderedCards,
+        specialistQuery: orderedCards[0]?.specialty,
+        originLabel: origin?.label,
+        sortMode,
+        travelMode,
+      }) ?? synthesis
+    : synthesis;
+
   return (
-    <div className="space-y-2" data-testid="specialist-list">
+    <div className="space-y-2.5" data-testid="specialist-list">
+      {!inspectedClinic && activeSynthesis && (
+        <SynthesisSummaryCard
+          synthesis={activeSynthesis}
+          specialists={orderedCards}
+          selectedId={selectedId}
+          travelMode={travelMode}
+          onSelectSpecialist={onFocusSpecialist}
+          onInspectDetails={openDetailInWindow}
+        />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex items-center gap-1.5 text-xs">
           <h2 className="font-semibold text-[var(--ink)]">
@@ -433,11 +481,11 @@ export function GenUiBlockRenderer({
         )}
       </div>
 
-      {/* Contained Scroll Window: eliminates excessive sidebar scrolling while letting users scroll through options or inspect next-level place details */}
+      {/* Desktop Contained Scroll Window / Seamless Full-Height Flow on Mobile */}
       <div
         ref={windowScrollRef}
         data-testid="options-scroll-window"
-        className="max-h-[540px] agent-scroll rounded-xl border border-[var(--line)] bg-[var(--bg)]/70 p-2 space-y-2"
+        className="lg:max-h-[540px] lg:agent-scroll rounded-xl border border-[var(--line)] bg-[var(--bg)]/70 p-2 space-y-2"
       >
         {inspectedClinic ? (
           <PlaceDetailView

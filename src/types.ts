@@ -98,6 +98,45 @@ export interface A2uiSurfaceMessage {
   };
 }
 
+export interface SpecialistScoreBreakdown {
+  /** Weighted overall score on a 0–100 scale */
+  overall: number;
+  /** Bayesian Google rating + review-volume subscore (0–100) */
+  ratingScore: number;
+  /** Live travel-time convenience subscore (0–100) */
+  travelTimeScore: number;
+  /** Route/proximity distance subscore (0–100) */
+  distanceScore: number;
+  weights: {
+    rating: number;
+    travelTime: number;
+    distance: number;
+  };
+}
+
+export interface SynthesisPick {
+  specialistId: string;
+  rank: 1 | 2 | 3;
+  badge: string;
+  rationale: string;
+  reviewSnippet?: string;
+  todayHours?: string | null;
+  scoreBreakdown: SpecialistScoreBreakdown;
+}
+
+export interface RankedSynthesisResult {
+  headline: string;
+  weights: {
+    ratingPct: number;
+    travelTimePct: number;
+    distancePct: number;
+  };
+  sortMode: SortMode;
+  travelMode: TravelMode;
+  originLabel?: string | null;
+  picks: SynthesisPick[];
+}
+
 export interface Specialist {
   id: string;
   name: string;
@@ -126,8 +165,10 @@ export interface Specialist {
   distanceMeters: number | null;
   /** True when travel time came directly from Google Routes/Places routingSummaries */
   isRouteVerified: boolean;
-  /** Composite score on 0–100 scale combining rating quality and travel time */
+  /** Composite score on 0–100 scale combining rating quality, travel time, and distance */
   compositeScore?: number;
+  /** Explicit weighted factor breakdown (rating, travel time, distance) */
+  scoreBreakdown?: SpecialistScoreBreakdown;
 }
 
 export interface ParsedIntent {
@@ -184,6 +225,7 @@ export interface AgentTurn {
   text: string;
   groundingSources?: GroundingSource[];
   genUiBlock?: GenUiBlock;
+  synthesis?: RankedSynthesisResult;
   suggestedFollowUps?: SuggestedPrompt[];
   /** Snapshot of specialists referenced by this turn so earlier messages stay legible */
   specialistsSnapshot?: Specialist[];
@@ -203,6 +245,7 @@ export interface AgentSearchResponse {
   groundingSources: GroundingSource[];
   a2uiMessages?: A2uiSurfaceMessage[];
   genUiBlock?: GenUiBlock;
+  synthesis?: RankedSynthesisResult;
   suggestedFollowUps?: SuggestedPrompt[];
   focusSpecialistId?: string | null;
   selectForSyncIds?: string[];

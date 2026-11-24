@@ -191,6 +191,7 @@ function formatSpecialistsContext(
       const safeName = cleanBoundedText(s.name, 120) || 'Specialist';
       const safeSpecialty = cleanBoundedText(s.specialty, 80) || 'Specialist';
       const todayHours = cleanBoundedText(getTodayHoursSummary(s.weekdayDescriptions), 80);
+      const editorial = cleanBoundedText(s.editorialSummary, 110);
       const revList = (s.topReviews && s.topReviews.length > 0 ? s.topReviews : s.reviews) ?? [];
       const revNote = revList
         .slice(0, 2)
@@ -198,7 +199,14 @@ function formatSpecialistsContext(
         .join(' / ');
       const open =
         s.openNow === true ? 'Open now' : s.openNow === false ? 'Closed now' : 'Hours unknown';
-      return `#${idx + 1} ${safeName} (${safeSpecialty}) — ${s.rating?.toFixed(1) ?? 'N/A'}★ (${s.userRatingCount} reviews), ${formatTravelTime(s.travelDurationSeconds)} ${modeLabel} (${formatDistance(s.distanceMeters)}), ${open}${todayHours ? `, today: ${todayHours}` : ''}${revNote ? ` | Reviews: ${revNote}` : ''}`;
+      const dist = formatDistance(s.distanceMeters) || 'distance N/A';
+      const breakdown = s.scoreBreakdown
+        ? `Weighted ${s.scoreBreakdown.overall}/100 [Rating ${s.scoreBreakdown.ratingScore}, Time ${s.scoreBreakdown.travelTimeScore}, Dist ${s.scoreBreakdown.distanceScore}]`
+        : s.compositeScore != null
+          ? `Weighted ${s.compositeScore}/100`
+          : '';
+      const access = s.wheelchairAccessible ? ', wheelchair accessible' : '';
+      return `#${idx + 1} ${safeName} (${safeSpecialty}) — ${breakdown ? `${breakdown} | ` : ''}${s.rating?.toFixed(1) ?? 'N/A'}★ (${s.userRatingCount} reviews), ${formatTravelTime(s.travelDurationSeconds)} ${modeLabel} (${dist}), ${open}${todayHours ? `, today: ${todayHours}` : ''}${access}${editorial ? ` | Summary: ${editorial}` : ''}${revNote ? ` | Reviews: ${revNote}` : ''}`;
     })
     .join('\n');
 }
@@ -472,15 +480,19 @@ export async function runGroundedPlacesSynthesis(
   const toolConfig = buildMapsToolConfig(coords);
   const tryMapsGrounding = options.useMapsGrounding ?? isMapsGroundingReady();
 
+  const { rating, travelTime, distance } = SHOWCASE_CONFIG.agent.rankingWeights;
+  const weightLine = `Weighted ranking formula: ${Math.round(rating * 100)}% Google rating & review volume, ${Math.round(travelTime * 100)}% travel time, ${Math.round(distance * 100)}% distance.`;
+
   const prompt = `${recentHistory ? `Recent:\n${recentHistory}\n\n` : ''}Origin: ${cleanBoundedText(origin?.formattedAddress, 200) || 'Not specified'}
-Mapped options:
+${weightLine}
+Live mapped options with place details:
 ${context}
 
 User: "${cleanBoundedText(userMessage, 400)}"
 
-Reply in 2 crisp sentences (under 55 words, plain text, no markdown). Compare ratings/review counts, travel times, today's open hours, and a specific review highlight so the user can decide confidently.`;
+Synthesize a crisp 2-sentence decision verdict (under 65 words, plain text, no markdown). Explain why #1 leads on the weighted balance of Google rating, travel time, and distance (citing hours or a concrete review detail), and name the strongest #2 alternative (e.g. faster trip or higher rating).`;
 
-  const systemInstruction = `You are ${SHOWCASE_CONFIG.agent.persona}. Ground every recommendation and comparison in live Google Maps data.`;
+  const systemInstruction = `You are ${SHOWCASE_CONFIG.agent.persona}. Reason carefully over the live place details (Google ratings, review counts, travel times, distances, hours, and reviews) and ground recommendations in Google Maps.`;
 
   if (tryMapsGrounding) {
     try {

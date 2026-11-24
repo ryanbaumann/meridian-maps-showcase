@@ -23,6 +23,7 @@ import { buildContextualFollowUps } from './utils/agentLogic.ts';
 import { isValidGooglePlaceId } from './utils/mapsSync.ts';
 import { rankSpecialists } from './utils/ranking.ts';
 import { isUsableApiKey } from './utils/sanitize.ts';
+import { buildRankedSynthesis } from './utils/synthesis.ts';
 
 const RAW_INITIAL_MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
 const INITIAL_MAPS_KEY = isUsableApiKey(RAW_INITIAL_MAPS_KEY) ? RAW_INITIAL_MAPS_KEY : '';
@@ -236,6 +237,14 @@ export default function App() {
           setSelectedId(null);
         }
 
+        if (
+          typeof window !== 'undefined' &&
+          window.innerWidth < 1024 &&
+          data.action !== 'set_location_only'
+        ) {
+          setMobileSnap('full');
+        }
+
         setTurns((prev) => [
           ...prev,
           {
@@ -244,6 +253,7 @@ export default function App() {
             text: data.agentSummary || 'Mapped nearby options.',
             groundingSources: data.groundingSources,
             genUiBlock: data.genUiBlock,
+            synthesis: data.synthesis,
             suggestedFollowUps: data.suggestedFollowUps,
             specialistsSnapshot: nextSpecialists.length > 0 ? nextSpecialists : undefined,
             travelMode: data.travelMode || targetMode,
@@ -280,35 +290,46 @@ export default function App() {
           { id: makeTurnId('a'), role: 'assistant', text: '', error: result.error },
         ]);
       } else if (result.specialists) {
-        setRawSpecialists(result.specialists);
+        const rankedFallback = rankSpecialists(result.specialists, sortMode);
+        setRawSpecialists(rankedFallback);
         setSelectedId(null);
-        const nextIdSet = new Set(result.specialists.map((s) => s.id));
+        const nextIdSet = new Set(rankedFallback.map((s) => s.id));
         setSyncedIds((prev) => prev.filter((id) => nextIdSet.has(id)));
-        const top = result.specialists[0];
+        if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+          setMobileSnap('full');
+        }
+        const top = rankedFallback[0];
         setTurns((prev) => [
           ...prev,
           {
             id: makeTurnId('a'),
             role: 'assistant',
             text: top
-              ? `Found ${result.specialists!.length} options near ${result.origin?.label || 'you'}. ${top.name} ranks #1.`
+              ? `Found ${rankedFallback.length} options near ${result.origin?.label || 'you'}. ${top.name} ranks #1.`
               : 'No nearby matches found.',
             genUiBlock:
-              result.specialists!.length > 0
+              rankedFallback.length > 0
                 ? {
                     type: 'place_cards',
-                    specialistIds: result.specialists!.map((s) => s.id),
+                    specialistIds: rankedFallback.map((s) => s.id),
                     title: 'Top matches',
                   }
                 : undefined,
+            synthesis: buildRankedSynthesis({
+              specialists: rankedFallback,
+              specialistQuery: top?.specialty,
+              originLabel: result.origin?.label ?? origin?.label,
+              sortMode,
+              travelMode,
+            }),
             suggestedFollowUps: buildContextualFollowUps({
               origin: result.origin ?? origin,
-              specialists: result.specialists!,
+              specialists: rankedFallback,
               travelMode,
               actionJustTaken: 'search',
               syncedCount: 0,
             }),
-            specialistsSnapshot: result.specialists,
+            specialistsSnapshot: rankedFallback,
             travelMode,
           },
         ]);
@@ -334,7 +355,7 @@ export default function App() {
       }
       setIsLoading(false);
     },
-    [origin, travelMode]
+    [origin, sortMode, travelMode]
   );
 
   const handleSetLocationText = useCallback(
@@ -873,7 +894,7 @@ export default function App() {
               onReset={handleReset}
             />
 
-            <div className="order-1 lg:order-2 relative flex-1 min-w-0 min-h-[190px] lg:min-h-0">
+            <div className="order-1 lg:order-2 relative flex-1 min-w-0 min-h-[104px] lg:min-h-0">
               <SpecialistMap
                 origin={origin}
                 specialists={rankedSpecialists}
