@@ -13,6 +13,8 @@ import {
   Box,
   Car,
   Check,
+  ChevronDown,
+  ChevronUp,
   Compass,
   Crosshair,
   Footprints,
@@ -21,6 +23,7 @@ import {
   Moon,
   Navigation,
   Orbit,
+  SlidersHorizontal,
   Star,
   Sun,
 } from 'lucide-react';
@@ -287,6 +290,9 @@ export function SpecialistMap({
   const [recenterSignal, setRecenterSignal] = useState(0);
   // Keep main Vector view strictly orthogonal (tilt: 0, heading: 0) until user opts into Tilt
   const [vectorTilted, setVectorTilted] = useState(false);
+  // Keep secondary map controls and bottom-right route card minimized by default for an unobstructed map
+  const [mapControlsOpen, setMapControlsOpen] = useState(false);
+  const [routeBarExpanded, setRouteBarExpanded] = useState(false);
   const [stageSize, setStageSize] = useState(() => ({
     width: typeof window !== 'undefined' ? window.innerWidth : 1280,
     height: typeof window !== 'undefined' ? window.innerHeight : 800,
@@ -344,8 +350,8 @@ export function SpecialistMap({
       widthPx: stageSize.width,
       heightPx: stageSize.height,
       leftInsetPx: isDesktop && inspectedSpecialist ? 384 : 0,
-      bottomInsetPx: isDesktop && selectedSpecialist ? 96 : 36,
-      topInsetPx: 68,
+      bottomInsetPx: isDesktop && selectedSpecialist && routeBarExpanded ? 96 : 44,
+      topInsetPx: 56,
     };
   }, [
     stageSize.width,
@@ -353,6 +359,7 @@ export function SpecialistMap({
     stageSize.viewportWidth,
     selectedSpecialist,
     inspectedSpecialist,
+    routeBarExpanded,
   ]);
 
   const pointsList = useMemo(
@@ -597,10 +604,10 @@ export function SpecialistMap({
         </div>
       )}
 
-      {/* Top-Right Responsive Map Toolbar (2 compact rows below xl; 1 row on wide desktops) */}
-      <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 flex flex-col xl:flex-row items-end xl:items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-1.5rem)]">
-        {/* Primary Row: Vector/3D + Travel Mode + Theme */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+      {/* Top-Right Compact Map Controls (minimized by default; expands travel, camera & theme options) */}
+      <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 flex flex-col items-end gap-1.5 max-w-[calc(100vw-1.5rem)]">
+        {/* Compact Always-Visible Pill: Vector/3D toggle + Expandable Controls trigger */}
+        <div className="flex items-center gap-1.5">
           <div
             role="group"
             aria-label="Map view mode"
@@ -634,159 +641,193 @@ export function SpecialistMap({
             </button>
           </div>
 
-          <div
-            role="group"
-            aria-label="Travel mode"
-            className="flex items-center p-0.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm"
-          >
-            {(
-              [
-                { id: 'DRIVE', label: 'Drive', Icon: Car },
-                { id: 'WALK', label: 'Walk', Icon: Footprints },
-                { id: 'BICYCLE', label: 'Bike', Icon: Bike },
-              ] as const
-            ).map(({ id, label, Icon }) => {
-              const active = travelMode === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onChangeTravelMode(id)}
-                  aria-pressed={active}
-                  aria-label={label}
-                  title={label}
-                  className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-0 sm:px-2.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
-                    active
-                      ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
-                      : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)]'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span className="hidden sm:inline">{label}</span>
-                </button>
-              );
-            })}
-          </div>
-
           <button
             type="button"
-            onClick={onToggleTheme}
-            aria-label={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            title={resolvedTheme === 'dark' ? 'Light theme' : 'Dark theme'}
-            className="flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-[38px] bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm text-[var(--ink)] hover:border-[var(--accent)] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+            onClick={() => setMapControlsOpen((v) => !v)}
+            aria-expanded={mapControlsOpen}
+            aria-label={mapControlsOpen ? 'Minimize map controls' : 'Expand map controls'}
+            title={mapControlsOpen ? 'Minimize controls' : 'Map controls (travel mode, camera, theme)'}
+            data-testid="map-controls-toggle"
+            className={`inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 sm:px-2.5 rounded-xl border shadow-sm text-xs font-medium transition-colors cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+              mapControlsOpen
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent)]'
+                : 'bg-[var(--surface)]/95 text-[var(--ink)] border-[var(--line)] hover:border-[var(--accent)]'
+            }`}
           >
-            {resolvedTheme === 'dark' ? (
-              <Sun className="w-4 h-4" aria-hidden="true" />
+            <SlidersHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
+            <span className="hidden sm:inline">Controls</span>
+            {mapControlsOpen ? (
+              <ChevronUp className="w-3.5 h-3.5 hidden sm:inline" aria-hidden="true" />
             ) : (
-              <Moon className="w-4 h-4" aria-hidden="true" />
+              <ChevronDown className="w-3.5 h-3.5 hidden sm:inline" aria-hidden="true" />
             )}
           </button>
         </div>
 
-        {/* Camera Actions Row (drops cleanly below on < sm; inline on sm+) */}
-        {(origin || specialists.length > 0) && (
+        {/* Collapsible Secondary Controls Popover (minimized by default) */}
+        {mapControlsOpen && (
           <div
-            className={`${hideSecondaryControlsOnMobile ? 'hidden lg:flex' : 'flex'} items-center gap-1.5`}
+            data-testid="map-controls-panel"
+            className={`${
+              hideSecondaryControlsOnMobile ? 'hidden lg:flex' : 'flex'
+            } flex-col items-end gap-2 p-2.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-lg`}
           >
-            {mapViewMode === 'vector' && selectedSpecialist && specialists.length > 1 && (
-              <button
-                type="button"
-                onClick={() => onSelectSpecialist(null)}
-                aria-label="Show all results and starting location"
-                title="Show all results"
-                className="inline-flex items-center justify-center min-h-[44px] sm:min-h-[38px] px-3 sm:px-2.5 text-xs font-medium rounded-xl border shadow-sm bg-[var(--surface)]/95 text-[var(--ink)] border-[var(--line)] hover:border-[var(--accent)] transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
-              >
-                All
-              </button>
-            )}
-
-            {mapViewMode === 'vector' && selectedSpecialist && (
-              <button
-                type="button"
-                onClick={() => setVectorTilted((v) => !v)}
-                aria-pressed={vectorTilted}
-                title={vectorTilted ? 'Switch to top-down 2D' : 'Tilt camera for 3D buildings'}
-                className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[38px] px-3 sm:px-2.5 text-xs font-medium rounded-xl border shadow-sm transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
-                  vectorTilted
-                    ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
-                    : 'bg-[var(--surface)]/95 text-[var(--ink)] border-[var(--line)] hover:border-[var(--accent)]'
-                }`}
-              >
-                <Compass className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Tilt</span>
-              </button>
-            )}
-
-            {/* 3D Camera Views (Route corridor, Street close-up, Aerial sweep, and 360° Orbit) */}
-            {mapViewMode === '3d' && (
+            {/* Travel Mode + Theme Row */}
+            <div className="flex items-center gap-1.5">
               <div
                 role="group"
-                aria-label="3D camera view"
-                className="flex items-center p-0.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm"
+                aria-label="Travel mode"
+                className="flex items-center p-0.5 bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg"
               >
                 {(
                   [
-                    { id: 'corridor', label: 'Route' },
-                    { id: 'street', label: 'Street' },
-                    { id: 'overview', label: 'Aerial' },
+                    { id: 'DRIVE', label: 'Drive', Icon: Car },
+                    { id: 'WALK', label: 'Walk', Icon: Footprints },
+                    { id: 'BICYCLE', label: 'Bike', Icon: Bike },
                   ] as const
-                ).map(({ id, label }) => {
-                  const active = camera3DView === id;
+                ).map(({ id, label, Icon }) => {
+                  const active = travelMode === id;
                   return (
                     <button
                       key={id}
                       type="button"
-                      onClick={() => {
-                        onChangeCamera3DView(id);
-                        setRecenterSignal((n) => n + 1);
-                      }}
+                      onClick={() => onChangeTravelMode(id)}
                       aria-pressed={active}
-                      className={`inline-flex items-center justify-center min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+                      aria-label={label}
+                      title={label}
+                      className={`inline-flex items-center justify-center gap-1.5 min-h-[40px] sm:min-h-[30px] px-2.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
                         active
                           ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
-                          : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)]'
+                          : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)]'
                       }`}
                     >
-                      {label}
+                      <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{label}</span>
                     </button>
                   );
                 })}
-                {selectedSpecialist && (
+              </div>
+
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                aria-label={
+                  resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
+                }
+                title={resolvedTheme === 'dark' ? 'Light theme' : 'Dark theme'}
+                className="flex items-center justify-center min-h-[40px] min-w-[40px] sm:min-h-[34px] sm:min-w-[34px] bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg text-[var(--ink)] hover:border-[var(--accent)] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+              >
+                {resolvedTheme === 'dark' ? (
+                  <Sun className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <Moon className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+
+            {/* Camera Actions Row */}
+            {(origin || specialists.length > 0) && (
+              <div className="flex items-center gap-1.5">
+                {mapViewMode === 'vector' && selectedSpecialist && specialists.length > 1 && (
                   <button
                     type="button"
-                    onClick={() =>
-                      onChangeCamera3DView(camera3DView === 'orbit' ? 'street' : 'orbit')
-                    }
-                    aria-pressed={camera3DView === 'orbit'}
-                    aria-label={`Orbit ${selectedSpecialist.name} in 3D`}
-                    title="Orbit selected place"
-                    className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
-                      camera3DView === 'orbit'
-                        ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
-                        : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)]'
-                    }`}
+                    onClick={() => onSelectSpecialist(null)}
+                    aria-label="Show all results and starting location"
+                    title="Show all results"
+                    className="inline-flex items-center justify-center min-h-[40px] sm:min-h-[32px] px-2.5 text-xs font-medium rounded-lg border bg-[var(--surface-subtle)] text-[var(--ink)] border-[var(--line)] hover:border-[var(--accent)] transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
                   >
-                    <Orbit className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>{camera3DView === 'orbit' ? 'Stop' : 'Orbit'}</span>
+                    All
                   </button>
                 )}
+
+                {mapViewMode === 'vector' && selectedSpecialist && (
+                  <button
+                    type="button"
+                    onClick={() => setVectorTilted((v) => !v)}
+                    aria-pressed={vectorTilted}
+                    title={vectorTilted ? 'Switch to top-down 2D' : 'Tilt camera for 3D buildings'}
+                    className={`inline-flex items-center justify-center gap-1.5 min-h-[40px] sm:min-h-[32px] px-2.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+                      vectorTilted
+                        ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
+                        : 'bg-[var(--surface-subtle)] text-[var(--ink)] border-[var(--line)] hover:border-[var(--accent)]'
+                    }`}
+                  >
+                    <Compass className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Tilt</span>
+                  </button>
+                )}
+
+                {mapViewMode === '3d' && (
+                  <div
+                    role="group"
+                    aria-label="3D camera view"
+                    className="flex items-center p-0.5 bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg"
+                  >
+                    {(
+                      [
+                        { id: 'corridor', label: 'Route' },
+                        { id: 'street', label: 'Street' },
+                        { id: 'overview', label: 'Aerial' },
+                      ] as const
+                    ).map(({ id, label }) => {
+                      const active = camera3DView === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => {
+                            onChangeCamera3DView(id);
+                            setRecenterSignal((n) => n + 1);
+                          }}
+                          aria-pressed={active}
+                          className={`inline-flex items-center justify-center min-h-[40px] sm:min-h-[30px] px-2.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+                            active
+                              ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
+                              : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                    {selectedSpecialist && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChangeCamera3DView(camera3DView === 'orbit' ? 'street' : 'orbit')
+                        }
+                        aria-pressed={camera3DView === 'orbit'}
+                        aria-label={`Orbit ${selectedSpecialist.name} in 3D`}
+                        title="Orbit selected place"
+                        className={`inline-flex items-center justify-center gap-1 min-h-[40px] sm:min-h-[30px] px-2.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap cursor-pointer active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+                          camera3DView === 'orbit'
+                            ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]'
+                            : 'border-transparent text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)]'
+                        }`}
+                      >
+                        <Orbit className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>{camera3DView === 'orbit' ? 'Stop' : 'Orbit'}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (mapViewMode === '3d' && (camera3DView === 'free' || camera3DView === 'orbit')) {
+                      onChangeCamera3DView('corridor');
+                    }
+                    setRecenterSignal((n) => n + 1);
+                  }}
+                  aria-label="Recenter camera"
+                  title="Recenter"
+                  className="flex items-center justify-center min-h-[40px] min-w-[40px] sm:min-h-[34px] sm:min-w-[34px] bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg text-[var(--ink)] hover:border-[var(--accent)] active:scale-95 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                >
+                  <Crosshair className="w-4 h-4" aria-hidden="true" />
+                </button>
               </div>
             )}
-
-            <button
-              type="button"
-              onClick={() => {
-                if (mapViewMode === '3d' && (camera3DView === 'free' || camera3DView === 'orbit')) {
-                  onChangeCamera3DView('corridor');
-                }
-                setRecenterSignal((n) => n + 1);
-              }}
-              aria-label="Recenter camera"
-              title="Recenter"
-              className="flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-[38px] bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-sm text-[var(--ink)] hover:border-[var(--accent)] active:scale-95 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
-            >
-              <Crosshair className="w-4 h-4" aria-hidden="true" />
-            </button>
           </div>
         )}
       </div>
@@ -818,76 +859,108 @@ export function SpecialistMap({
         </aside>
       )}
 
-      {/* Desktop Bottom-Right Active Route Chip (lifted above Google Maps attribution bar) */}
+      {/* Desktop Bottom-Right Active Route Chip (minimized by default; lifted above Google Maps attribution) */}
       {selectedSpecialist && (
         <div
-          className="hidden lg:flex absolute bottom-8 right-4 z-20 items-center gap-3 px-3.5 py-2.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-md max-w-lg"
+          className="hidden lg:flex absolute bottom-8 right-4 z-20"
           data-testid="active-route-bar"
         >
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-[var(--ink)] truncate">
-              {selectedSpecialist.name}
-            </p>
-            <div className="flex items-center gap-1.5 text-xs text-[var(--muted)] tabular-nums mt-0.5">
+          {!routeBarExpanded ? (
+            <button
+              type="button"
+              onClick={() => setRouteBarExpanded(true)}
+              aria-expanded={false}
+              aria-label={`Expand route summary for ${selectedSpecialist.name}`}
+              className="inline-flex items-center gap-2 h-9 px-3 bg-[var(--surface)]/95 border border-[var(--line)] hover:border-[var(--accent)] rounded-xl shadow-md text-xs transition-colors cursor-pointer max-w-[260px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+            >
+              <Navigation className="w-3.5 h-3.5 text-[var(--accent-text)] shrink-0" aria-hidden="true" />
               {activeDuration != null && (
-                <span className="font-semibold text-[var(--accent-text)]">
-                  {formatTravelTime(activeDuration)} {getTravelModeVerb(travelMode)}
+                <span className="font-semibold text-[var(--accent-text)] tabular-nums shrink-0">
+                  {formatTravelTime(activeDuration)}
                 </span>
               )}
-              {activeDistance != null && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{formatDistance(activeDistance)}</span>
-                </>
-              )}
-              {selectedSpecialist.rating != null && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{selectedSpecialist.rating.toFixed(1)}★</span>
-                </>
-              )}
-              {selectedSpecialist.openNow != null && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span
-                    className="font-semibold"
-                    style={{
-                      color: selectedSpecialist.openNow
-                        ? 'var(--status-open)'
-                        : 'var(--status-closed)',
-                    }}
-                  >
-                    {selectedSpecialist.openNow ? 'Open' : 'Closed'}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
+              <span className="font-medium text-[var(--ink)] truncate">
+                {selectedSpecialist.name}
+              </span>
+              <ChevronUp className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" aria-hidden="true" />
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 px-3.5 py-2.5 bg-[var(--surface)]/95 border border-[var(--line)] rounded-xl shadow-md max-w-lg">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-[var(--ink)] truncate">
+                  {selectedSpecialist.name}
+                </p>
+                <div className="flex items-center gap-1.5 text-xs text-[var(--muted)] tabular-nums mt-0.5">
+                  {activeDuration != null && (
+                    <span className="font-semibold text-[var(--accent-text)]">
+                      {formatTravelTime(activeDuration)} {getTravelModeVerb(travelMode)}
+                    </span>
+                  )}
+                  {activeDistance != null && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>{formatDistance(activeDistance)}</span>
+                    </>
+                  )}
+                  {selectedSpecialist.rating != null && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>{selectedSpecialist.rating.toFixed(1)}★</span>
+                    </>
+                  )}
+                  {selectedSpecialist.openNow != null && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span
+                        className="font-semibold"
+                        style={{
+                          color: selectedSpecialist.openNow
+                            ? 'var(--status-open)'
+                            : 'var(--status-closed)',
+                        }}
+                      >
+                        {selectedSpecialist.openNow ? 'Open' : 'Closed'}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {onOpenDetails && (
-              <button
-                type="button"
-                onClick={() => onOpenDetails(selectedSpecialist.id)}
-                className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded-lg bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] text-[var(--ink)] border border-[var(--control-line)] hover:border-[var(--accent)] active:scale-[0.98] transition-colors whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-              >
-                <Info className="w-3.5 h-3.5 text-[var(--accent-text)]" aria-hidden="true" />
-                <span>Details</span>
-              </button>
-            )}
-            {directionsHref && (
-              <a
-                href={directionsHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded-lg bg-[var(--accent)] text-[var(--accent-ink)] hover:opacity-90 active:scale-[0.98] transition-opacity whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-              >
-                <Navigation className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Route</span>
-                <span className="sr-only"> to {selectedSpecialist.name}</span>
-              </a>
-            )}
-          </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {onOpenDetails && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetails(selectedSpecialist.id)}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded-lg bg-[var(--surface-subtle)] hover:bg-[var(--accent-soft)] text-[var(--ink)] border border-[var(--control-line)] hover:border-[var(--accent)] active:scale-[0.98] transition-colors whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                  >
+                    <Info className="w-3.5 h-3.5 text-[var(--accent-text)]" aria-hidden="true" />
+                    <span>Details</span>
+                  </button>
+                )}
+                {directionsHref && (
+                  <a
+                    href={directionsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded-lg bg-[var(--accent)] text-[var(--accent-ink)] hover:opacity-90 active:scale-[0.98] transition-opacity whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                  >
+                    <Navigation className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Route</span>
+                    <span className="sr-only"> to {selectedSpecialist.name}</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setRouteBarExpanded(false)}
+                  aria-label="Minimize route summary"
+                  title="Minimize"
+                  className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                >
+                  <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

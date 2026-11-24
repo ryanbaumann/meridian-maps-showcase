@@ -77,6 +77,11 @@ interface Maps3dLibraryShape {
     REQUIRED_AND_HIDES_OPTIONAL?: string;
     OPTIONAL_AND_HIDES_LOWER_PRIORITY?: string;
   };
+  GestureHandling?: {
+    AUTO?: string;
+    COOPERATIVE?: string;
+    GREEDY?: string;
+  };
 }
 
 /**
@@ -157,6 +162,7 @@ export function PhotorealisticMap3D({
         view: initialPreset,
       });
 
+      const greedyGesture = maps3dLib.GestureHandling?.GREEDY ?? 'GREEDY';
       const map3d = new maps3dLib.Map3DElement({
         center: initialCamera.center,
         range: initialCamera.range,
@@ -165,6 +171,7 @@ export function PhotorealisticMap3D({
         minTilt: 0,
         maxTilt: 68,
         mode: maps3dLib.MapMode?.HYBRID ?? 'HYBRID',
+        gestureHandling: greedyGesture,
         defaultUIHidden: true,
         internalUsageAttributionIds: [...SHOWCASE_CONFIG.attributionIds],
       });
@@ -173,6 +180,7 @@ export function PhotorealisticMap3D({
         'internal-usage-attribution-ids',
         SHOWCASE_CONFIG.attributionIds.join(' ')
       );
+      map3d.setAttribute('gesture-handling', 'greedy');
       map3d.style.width = '100%';
       map3d.style.height = '100%';
       map3d.style.display = 'block';
