@@ -334,103 +334,103 @@ function packGlb(parts) {
 }
 
 function buildMeridianDestinationBeacon() {
-  // 1. Ground slate pedestal disc
+  // 1. High-contrast obsidian ground pedestal disc
   const baseSlate = new MeshBuilder();
-  baseSlate.addFrustum({ yBottom: 0.0, yTop: 0.18, rBottom: 1.05, rTop: 0.94, segments: 24 });
+  baseSlate.addFrustum({ yBottom: 0.0, yTop: 0.24, rBottom: 1.25, rTop: 1.12, segments: 24 });
 
-  // 2. Crisp white architectural locator ring + tilted orbital halo
+  // 2. Crisp luminous white locator collar + bold tilted orbital halo
   const whiteTrim = new MeshBuilder();
-  whiteTrim.addAnnulus({ yBottom: 0.18, yTop: 0.28, rInner: 0.64, rOuter: 0.92, segments: 24 });
+  whiteTrim.addAnnulus({ yBottom: 0.24, yTop: 0.4, rInner: 0.72, rOuter: 1.1, segments: 24 });
   whiteTrim.addTorus({
-    yCenter: 2.25,
-    majorRadius: 1.08,
-    tubeRadius: 0.065,
+    yCenter: 2.5,
+    majorRadius: 1.28,
+    tubeRadius: 0.1,
     majorSegments: 28,
     tubeSegments: 10,
     tiltXRad: 0.42,
   });
 
-  // 3. Deep teal lower locator spire + lower crystal facets
+  // 3. Deep teal lower locator spire + faceted crystal lower body
   const deepTeal = new MeshBuilder();
-  deepTeal.addFrustum({ yBottom: 0.34, yTop: 1.05, rBottom: 0.0, rTop: 0.28, segments: 8, capBottom: false });
-  deepTeal.addFrustum({ yBottom: 1.25, yTop: 2.25, rBottom: 0.0, rTop: 0.78, segments: 8, capBottom: false, capTop: false });
+  deepTeal.addFrustum({ yBottom: 0.42, yTop: 1.25, rBottom: 0.0, rTop: 0.38, segments: 8, capBottom: false });
+  deepTeal.addFrustum({ yBottom: 1.4, yTop: 2.55, rBottom: 0.0, rTop: 0.94, segments: 8, capBottom: false, capTop: false });
 
   // 4. Luminous bright-teal upper faceted crown + floating apex jewel
   const brightTeal = new MeshBuilder();
-  brightTeal.addFrustum({ yBottom: 2.25, yTop: 3.35, rBottom: 0.78, rTop: 0.0, segments: 8, capBottom: false, capTop: false });
-  brightTeal.addSphere({ yCenter: 3.68, radius: 0.2, widthSegments: 14, heightSegments: 8 });
+  brightTeal.addFrustum({ yBottom: 2.55, yTop: 3.85, rBottom: 0.94, rTop: 0.0, segments: 8, capBottom: false, capTop: false });
+  brightTeal.addSphere({ yCenter: 4.25, radius: 0.28, widthSegments: 14, heightSegments: 8 });
 
   return packGlb([
     {
       name: 'SlateBase',
       mesh: baseSlate,
-      baseColor: [0.06, 0.09, 0.16, 1.0],
-      metallic: 0.22,
-      roughness: 0.42,
+      baseColor: [0.05, 0.08, 0.14, 1.0],
+      metallic: 0.2,
+      roughness: 0.38,
     },
     {
       name: 'PorcelainHalo',
       mesh: whiteTrim,
-      baseColor: [0.97, 0.98, 0.99, 1.0],
-      metallic: 0.12,
-      roughness: 0.24,
-      emissive: [0.12, 0.14, 0.16],
+      baseColor: [0.99, 0.99, 1.0, 1.0],
+      metallic: 0.08,
+      roughness: 0.2,
+      emissive: [0.36, 0.39, 0.42],
     },
     {
       name: 'DeepTealSpire',
       mesh: deepTeal,
-      baseColor: [0.06, 0.46, 0.43, 1.0],
-      metallic: 0.32,
-      roughness: 0.26,
-      emissive: [0.02, 0.12, 0.11],
+      baseColor: [0.05, 0.52, 0.48, 1.0],
+      metallic: 0.25,
+      roughness: 0.24,
+      emissive: [0.05, 0.24, 0.22],
     },
     {
       name: 'LuminousTealCrown',
       mesh: brightTeal,
-      baseColor: [0.08, 0.72, 0.65, 1.0],
-      metallic: 0.24,
-      roughness: 0.18,
-      emissive: [0.05, 0.26, 0.24],
+      baseColor: [0.09, 0.82, 0.74, 1.0],
+      metallic: 0.18,
+      roughness: 0.16,
+      emissive: [0.1, 0.48, 0.44],
     },
   ]);
 }
 
 function buildOriginCompassBeacon() {
-  // 1. Dark slate outer puck
+  // 1. Dark obsidian outer puck
   const outerSlate = new MeshBuilder();
-  outerSlate.addFrustum({ yBottom: 0.0, yTop: 0.22, rBottom: 0.95, rTop: 0.85, segments: 24 });
+  outerSlate.addFrustum({ yBottom: 0.0, yTop: 0.28, rBottom: 1.15, rTop: 1.04, segments: 24 });
 
-  // 2. Crisp white inner compass collar
+  // 2. Crisp luminous white inner compass collar
   const whiteRing = new MeshBuilder();
-  whiteRing.addAnnulus({ yBottom: 0.22, yTop: 0.34, rInner: 0.46, rOuter: 0.78, segments: 24 });
+  whiteRing.addAnnulus({ yBottom: 0.28, yTop: 0.44, rInner: 0.54, rOuter: 0.96, segments: 24 });
 
-  // 3. Bright teal center origin dome
+  // 3. Luminous bright teal center origin dome
   const centerDome = new MeshBuilder();
-  centerDome.addSphere({ yCenter: 0.38, radius: 0.34, widthSegments: 16, heightSegments: 10 });
+  centerDome.addSphere({ yCenter: 0.52, radius: 0.44, widthSegments: 16, heightSegments: 10 });
 
   return packGlb([
     {
       name: 'OriginSlateBezel',
       mesh: outerSlate,
-      baseColor: [0.06, 0.09, 0.16, 1.0],
-      metallic: 0.2,
-      roughness: 0.4,
+      baseColor: [0.05, 0.08, 0.14, 1.0],
+      metallic: 0.18,
+      roughness: 0.36,
     },
     {
       name: 'OriginWhiteRing',
       mesh: whiteRing,
-      baseColor: [0.98, 0.99, 1.0, 1.0],
-      metallic: 0.1,
-      roughness: 0.22,
-      emissive: [0.14, 0.15, 0.17],
+      baseColor: [0.99, 0.99, 1.0, 1.0],
+      metallic: 0.08,
+      roughness: 0.18,
+      emissive: [0.38, 0.4, 0.44],
     },
     {
       name: 'OriginTealCore',
       mesh: centerDome,
-      baseColor: [0.08, 0.72, 0.65, 1.0],
-      metallic: 0.2,
-      roughness: 0.22,
-      emissive: [0.06, 0.28, 0.25],
+      baseColor: [0.1, 0.84, 0.76, 1.0],
+      metallic: 0.15,
+      roughness: 0.18,
+      emissive: [0.12, 0.5, 0.45],
     },
   ]);
 }

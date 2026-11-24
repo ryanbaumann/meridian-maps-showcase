@@ -213,6 +213,9 @@ export function sanitizeSpecialists(raw: unknown): Specialist[] {
       directionsUri: safeExternalUrl(
         typeof item.directionsUri === 'string' ? item.directionsUri : undefined
       ),
+      reviewsUri: safeExternalUrl(
+        typeof item.reviewsUri === 'string' ? item.reviewsUri : undefined
+      ),
       photo: sanitizePhoto(item.photo),
       travelDurationSeconds: clampFiniteNumber(item.travelDurationSeconds, 0, 86_400),
       distanceMeters: clampFiniteNumber(item.distanceMeters, 0, 500_000),

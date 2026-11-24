@@ -56,7 +56,7 @@ export function buildRankedSynthesis(opts: {
   const { specialists, specialistQuery, originLabel, sortMode, travelMode, maxPicks = 3 } = opts;
   if (!specialists || specialists.length === 0) return undefined;
 
-  const top = specialists.slice(0, Math.min(maxPicks, 3));
+  const top = specialists.slice(0, Math.max(1, maxPicks));
   const validDurations = specialists
     .map((s) => s.travelDurationSeconds)
     .filter((d): d is number => d != null && Number.isFinite(d));
@@ -88,7 +88,7 @@ export function buildRankedSynthesis(opts: {
   const verb = getModeVerb(travelMode);
 
   const picks: SynthesisPick[] = top.map((item, idx) => {
-    const rank = (idx + 1) as 1 | 2 | 3;
+    const rank = idx + 1;
     const scoreBreakdown =
       item.scoreBreakdown ?? computeScoreBreakdown(item, maxDuration, maxDistance);
 
@@ -100,11 +100,11 @@ export function buildRankedSynthesis(opts: {
           : sortMode === 'rating'
             ? 'Top Rated'
             : 'Best Overall';
-    } else if (item.id === highestRatedId && rank > 1) {
+    } else if (item.id === highestRatedId && rank <= 3) {
       badge = 'Highest Rated';
-    } else if (item.id === fastestId && rank > 1) {
+    } else if (item.id === fastestId && rank <= 3) {
       badge = 'Fastest Trip';
-    } else if (item.id === closestId && rank > 1) {
+    } else if (item.id === closestId && rank <= 3) {
       badge = 'Closest Distance';
     } else if (item.openNow === true) {
       badge = 'Open Now';
@@ -149,7 +149,11 @@ export function buildRankedSynthesis(opts: {
   const { rating, travelTime, distance } = SHOWCASE_CONFIG.agent.rankingWeights;
   const label = capitalizeQuery(specialistQuery);
   const headline =
-    top.length === 1 ? `Top ${label} Match` : `Top ${top.length} ${label} Picks`;
+    top.length === 1
+      ? `Top ${label} Match`
+      : top.length <= 3
+        ? `Top ${top.length} ${label} Picks`
+        : `All ${top.length} ${label} Options`;
 
   return {
     headline,

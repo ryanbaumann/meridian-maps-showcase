@@ -280,7 +280,11 @@ interface PlacesTextSearchResponse {
     nationalPhoneNumber?: string;
     websiteUri?: string;
     googleMapsUri?: string;
-    googleMapsLinks?: { directionsUri?: string };
+    googleMapsLinks?: {
+      directionsUri?: string;
+      placeUri?: string;
+      reviewsUri?: string;
+    };
     primaryTypeDisplayName?: { text?: string };
     photos?: Array<{
       name?: string;
@@ -327,6 +331,8 @@ export async function searchPlacesWithRoutingServer(
     'places.websiteUri',
     'places.googleMapsUri',
     'places.googleMapsLinks.directionsUri',
+    'places.googleMapsLinks.placeUri',
+    'places.googleMapsLinks.reviewsUri',
     'places.primaryTypeDisplayName',
     'places.photos',
     'routingSummaries',
@@ -442,8 +448,9 @@ export async function searchPlacesWithRoutingServer(
           : undefined,
       phoneNumber: place.nationalPhoneNumber,
       websiteUri: place.websiteUri,
-      googleMapsUri: place.googleMapsUri,
+      googleMapsUri: place.googleMapsUri || place.googleMapsLinks?.placeUri,
       directionsUri: summary?.directionsUri || place.googleMapsLinks?.directionsUri,
+      reviewsUri: place.googleMapsLinks?.reviewsUri,
       photo,
       travelDurationSeconds,
       distanceMeters,
@@ -501,6 +508,8 @@ export async function fetchPlaceDetailsInsights(
     'nationalPhoneNumber',
     'websiteUri',
     'googleMapsUri',
+    'googleMapsLinks.placeUri',
+    'googleMapsLinks.reviewsUri',
   ].join(',');
 
   const detailsUrl = `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`;
@@ -543,6 +552,10 @@ export async function fetchPlaceDetailsInsights(
     nationalPhoneNumber?: string;
     websiteUri?: string;
     googleMapsUri?: string;
+    googleMapsLinks?: {
+      placeUri?: string;
+      reviewsUri?: string;
+    };
     reviews?: RawPlaceReview[];
     error?: { status?: string; message?: string };
   };
@@ -613,7 +626,8 @@ export async function fetchPlaceDetailsInsights(
           : null,
       phoneNumber: data.nationalPhoneNumber,
       websiteUri: data.websiteUri,
-      googleMapsUri: data.googleMapsUri,
+      googleMapsUri: data.googleMapsUri || data.googleMapsLinks?.placeUri,
+      reviewsUri: data.googleMapsLinks?.reviewsUri,
     },
   };
 }

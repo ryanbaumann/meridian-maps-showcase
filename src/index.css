@@ -61,9 +61,13 @@
   --accent-soft-light: #f0fdfa;
   --accent-soft-dark: #0d2b2a;
 
-  /* Status tokens (>=4.5:1 contrast in both light and dark modes) */
+  /* Status & chart tokens (>=4.5:1 contrast in both light and dark modes) */
   --status-open-light: #047857;
   --status-open-dark: #34d399;
+  --status-closed-light: #475569;
+  --status-closed-dark: #94a3b8;
+  --chart-distance-light: #4f46e5;
+  --chart-distance-dark: #818cf8;
   --status-error-light: #9f1239;
   --status-error-dark: #fda4af;
   --status-error-bg-light: #fff1f2;
@@ -95,6 +99,8 @@
   --accent-ink: var(--accent-ink-light);
   --accent-soft: var(--accent-soft-light);
   --status-open: var(--status-open-light);
+  --status-closed: var(--status-closed-light);
+  --chart-distance: var(--chart-distance-light);
   --status-error: var(--status-error-light);
   --status-error-bg: var(--status-error-bg-light);
   --status-error-border: var(--status-error-border-light);
@@ -123,6 +129,8 @@
     --accent-ink: var(--accent-ink-dark);
     --accent-soft: var(--accent-soft-dark);
     --status-open: var(--status-open-dark);
+    --status-closed: var(--status-closed-dark);
+    --chart-distance: var(--chart-distance-dark);
     --status-error: var(--status-error-dark);
     --status-error-bg: var(--status-error-bg-dark);
     --status-error-border: var(--status-error-border-dark);
@@ -148,6 +156,8 @@
   --accent-ink: var(--accent-ink-dark);
   --accent-soft: var(--accent-soft-dark);
   --status-open: var(--status-open-dark);
+  --status-closed: var(--status-closed-dark);
+  --chart-distance: var(--chart-distance-dark);
   --status-error: var(--status-error-dark);
   --status-error-bg: var(--status-error-bg-dark);
   --status-error-border: var(--status-error-border-dark);
@@ -176,6 +186,8 @@
     --accent-ink: light-dark(var(--accent-ink-light), var(--accent-ink-dark));
     --accent-soft: light-dark(var(--accent-soft-light), var(--accent-soft-dark));
     --status-open: light-dark(var(--status-open-light), var(--status-open-dark));
+    --status-closed: light-dark(var(--status-closed-light), var(--status-closed-dark));
+    --chart-distance: light-dark(var(--chart-distance-light), var(--chart-distance-dark));
     --status-error: light-dark(var(--status-error-light), var(--status-error-dark));
     --status-error-bg: light-dark(var(--status-error-bg-light), var(--status-error-bg-dark));
     --status-error-border: light-dark(var(--status-error-border-light), var(--status-error-border-dark));
@@ -216,6 +228,8 @@
     --accent-ink: HighlightText;
     --accent-soft: Canvas;
     --status-open: CanvasText;
+    --status-closed: CanvasText;
+    --chart-distance: CanvasText;
     --status-error: CanvasText;
     --status-error-bg: Canvas;
     --status-error-border: CanvasText;

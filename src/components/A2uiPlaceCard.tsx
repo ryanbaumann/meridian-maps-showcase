@@ -13,8 +13,8 @@ import type { OriginLocation, Specialist, TravelMode } from '../types.ts';
 import { getTodayHoursSummary } from '../utils/agentLogic.ts';
 import {
   buildA2uiPlaceSurfaceMessages,
+  buildPlaceDirectionsUrl,
   isValidGooglePlaceId,
-  toGoogleMapsUrlTravelMode,
 } from '../utils/mapsSync.ts';
 import { formatDistance, formatTravelTime } from '../utils/ranking.ts';
 import { safeExternalUrl } from '../utils/url.ts';
@@ -159,11 +159,7 @@ export function A2uiPlaceCard({
     };
   }, [specialist.id, orientation, hasValidPlaceId, apiIsLoaded]);
 
-  const directionsHref =
-    safeExternalUrl(specialist.directionsUri) ||
-    (origin
-      ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${specialist.location.lat},${specialist.location.lng}&travelmode=${toGoogleMapsUrlTravelMode(travelMode)}`
-      : safeExternalUrl(specialist.googleMapsUri));
+  const directionsHref = buildPlaceDirectionsUrl(origin, specialist, travelMode);
 
   const primaryAttribution = specialist.photo?.authorAttributions?.[0];
   const todayHours = getTodayHoursSummary(specialist.weekdayDescriptions);

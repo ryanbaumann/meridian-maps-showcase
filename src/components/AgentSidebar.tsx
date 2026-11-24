@@ -11,10 +11,14 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   ExternalLink,
+  Info,
+  ListChecks,
   LocateFixed,
   MapPin,
   Maximize2,
@@ -35,12 +39,16 @@ import type {
 } from '../types.ts';
 import { prefersReducedMotion } from '../utils/camera.ts';
 import {
+  buildGoogleMapsListSearchUrl,
   buildGoogleMapsSyncUrl,
-  toGoogleMapsUrlTravelMode,
+  buildPlaceDetailsUrl,
+  buildPlaceDirectionsUrl,
+  buildShortlistShareText,
 } from '../utils/mapsSync.ts';
 import { formatTravelTime } from '../utils/ranking.ts';
 import { safeExternalUrl } from '../utils/url.ts';
 import { GenUiBlockRenderer } from './GenUiBlocks.tsx';
+import { PlaceDetailView } from './PlaceDetailView.tsx';
 
 export type MobileSheetSnap = 'peek' | 'half' | 'full';
 
@@ -48,12 +56,14 @@ interface AgentSidebarProps {
   open: boolean;
   mobileSnap: MobileSheetSnap;
   origin: OriginLocation | null;
+  activeSpecialty: string | null;
   travelMode: TravelMode;
   sortMode: SortMode;
   resolvedTheme: ResolvedTheme;
   turns: AgentTurn[];
   specialists: Specialist[];
   selectedId: string | null;
+  inspectedId: string | null;
   syncedIds: string[];
   loadingDetailsId: string | null;
   isLoading: boolean;
@@ -65,6 +75,8 @@ interface AgentSidebarProps {
   onSetLocationText: (locationText: string) => void;
   onChangeSortMode: (mode: SortMode) => void;
   onSelectSpecialist: (id: string) => void;
+  onOpenDetails: (id: string) => void;
+  onCloseDetails: () => void;
   onHoverSpecialist: (id: string | null) => void;
   onToggleSyncId: (id: string) => void;
   onSelectTopThree: () => void;
@@ -75,20 +87,22 @@ interface AgentSidebarProps {
 
 const MOBILE_SNAP_HEIGHT_CLASS: Record<MobileSheetSnap, string> = {
   peek: 'h-auto max-h-[33dvh]',
-  half: 'h-[min(58dvh,calc(100%-104px))]',
-  full: 'h-[min(86dvh,calc(100%-104px))]',
+  half: 'h-[min(58dvh,calc(100%-112px))]',
+  full: 'h-[min(86dvh,calc(100%-112px))]',
 };
 
 export function AgentSidebar({
   open,
   mobileSnap,
   origin,
+  activeSpecialty,
   travelMode,
   sortMode,
   resolvedTheme,
   turns,
   specialists,
   selectedId,
+  inspectedId,
   syncedIds,
   loadingDetailsId,
   isLoading,
@@ -100,6 +114,8 @@ export function AgentSidebar({
   onSetLocationText,
   onChangeSortMode,
   onSelectSpecialist,
+  onOpenDetails,
+  onCloseDetails,
   onHoverSpecialist,
   onToggleSyncId,
   onSelectTopThree,
@@ -114,6 +130,7 @@ export function AgentSidebar({
   const [locationDraft, setLocationDraft] = useState('');
   const [welcomeLocationDraft, setWelcomeLocationDraft] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [shortlistOpen, setShortlistOpen] = useState(true);
 
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
@@ -123,6 +140,17 @@ export function AgentSidebar({
     () => specialists.find((s) => s.id === selectedId) ?? null,
     [specialists, selectedId]
   );
+
+  const inspectedSpecialist = useMemo(
+    () => specialists.find((s) => s.id === inspectedId) ?? null,
+    [specialists, inspectedId]
+  );
+
+  const inspectedRank = useMemo(() => {
+    if (!inspectedSpecialist) return 1;
+    const idx = specialists.findIndex((s) => s.id === inspectedSpecialist.id);
+    return idx >= 0 ? idx + 1 : 1;
+  }, [specialists, inspectedSpecialist]);
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({
@@ -140,15 +168,40 @@ export function AgentSidebar({
 
   const syncedSet = useMemo(() => new Set(syncedIds), [syncedIds]);
 
-  const googleMapsSyncUrl = useMemo(
+  const shortlistListSearchUrl = useMemo(
+    () => buildGoogleMapsListSearchUrl(activeSpecialty, origin, syncedSpecialists),
+    [activeSpecialty, origin, syncedSpecialists]
+  );
+
+  const multiStopRouteUrl = useMemo(
     () => buildGoogleMapsSyncUrl(origin, syncedSpecialists, travelMode),
     [origin, syncedSpecialists, travelMode]
   );
 
-  const handleCopySyncLink = async () => {
-    if (!googleMapsSyncUrl) return;
+  const singleShortlistPlaceUrl = useMemo(
+    () =>
+      syncedSpecialists.length === 1
+        ? buildPlaceDetailsUrl(syncedSpecialists[0]) ?? null
+        : null,
+    [syncedSpecialists]
+  );
+
+  const singleShortlistRouteUrl = useMemo(
+    () =>
+      syncedSpecialists.length === 1
+        ? buildPlaceDirectionsUrl(origin, syncedSpecialists[0], travelMode) ?? null
+        : null,
+    [origin, syncedSpecialists, travelMode]
+  );
+
+  const handleCopyShortlist = async () => {
+    const text =
+      syncedSpecialists.length === 1
+        ? singleShortlistPlaceUrl || ''
+        : buildShortlistShareText(origin, syncedSpecialists, travelMode);
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(googleMapsSyncUrl);
+      await navigator.clipboard.writeText(text);
       setCopiedLink(true);
       window.setTimeout(() => setCopiedLink(false), 2000);
     } catch {
@@ -184,8 +237,20 @@ export function AgentSidebar({
 
   const handleAskAboutClinic = (clinic: Specialist) => {
     if (isLoading) return;
-    onChangeMobileSnap('full');
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      onCloseDetails();
+      onChangeMobileSnap('full');
+    }
     onSubmitMessage(`Hours and reviews for ${clinic.name}`);
+  };
+
+  const handleAskInspectorQuestion = (question: string) => {
+    if (isLoading) return;
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      onCloseDetails();
+      onChangeMobileSnap('full');
+    }
+    onSubmitMessage(question);
   };
 
   const handleGrabTouchStart = (e: TouchEvent<HTMLElement>) => {
@@ -212,11 +277,7 @@ export function AgentSidebar({
 
   const peekSpecialist = selectedSpecialist ?? specialists[0] ?? null;
 
-  const peekDirectionsHref =
-    safeExternalUrl(peekSpecialist?.directionsUri) ||
-    (peekSpecialist && origin
-      ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${peekSpecialist.location.lat},${peekSpecialist.location.lng}&travelmode=${toGoogleMapsUrlTravelMode(travelMode)}`
-      : safeExternalUrl(peekSpecialist?.googleMapsUri));
+  const peekDirectionsHref = buildPlaceDirectionsUrl(origin, peekSpecialist, travelMode);
 
   return (
     <>
@@ -441,6 +502,14 @@ export function AgentSidebar({
             </p>
           </button>
           <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onOpenDetails(peekSpecialist.id)}
+              className="inline-flex items-center justify-center gap-1 min-h-[44px] px-2.5 text-xs font-semibold rounded-lg bg-[var(--surface-subtle)] border border-[var(--control-line)] text-[var(--ink)] active:scale-[0.98] cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+            >
+              <Info className="w-3.5 h-3.5 text-[var(--accent-text)]" aria-hidden="true" />
+              <span>Details</span>
+            </button>
             {peekDirectionsHref && (
               <a
                 href={peekDirectionsHref}
@@ -457,13 +526,33 @@ export function AgentSidebar({
         </div>
       )}
 
-      {/* Main Scrollable Thread & A2UI Cards (hidden on mobile peek so map owns the viewport) */}
+      {/* Mobile Dedicated Place Inspector View (1-tap back to chat & options) */}
+      {inspectedSpecialist && mobileSnap !== 'peek' && (
+        <div className="lg:hidden flex-1 agent-scroll px-3 py-3">
+          <PlaceDetailView
+            specialist={inspectedSpecialist}
+            rank={inspectedRank}
+            origin={origin}
+            travelMode={travelMode}
+            isSynced={syncedSet.has(inspectedSpecialist.id)}
+            isLoadingDetails={loadingDetailsId === inspectedSpecialist.id}
+            backLabel="Back to agent & options"
+            onBack={onCloseDetails}
+            onToggleSync={onToggleSyncId}
+            onAskAboutClinic={handleAskAboutClinic}
+            onAskQuestion={handleAskInspectorQuestion}
+            onRequestDetails={onRequestPlaceDetails}
+          />
+        </div>
+      )}
+
+      {/* Main Scrollable Thread & A2UI Cards (hidden on mobile peek or mobile detail view) */}
       <div
         role="log"
         aria-live="polite"
         aria-label={`Conversation with ${SHOWCASE_CONFIG.brandName}`}
         className={`flex-1 agent-scroll px-4 py-4 ${
-          mobileSnap === 'peek' ? 'hidden lg:block' : 'block'
+          mobileSnap === 'peek' || inspectedSpecialist ? 'hidden lg:block' : 'block'
         }`}
       >
         <maui-providers additional-attribution-ids={SHOWCASE_CONFIG.attributionIds.join(',')}>
@@ -728,6 +817,8 @@ export function AgentSidebar({
                     onUseGps={onUseGps}
                     onSubmitLocationText={onSetLocationText}
                     onAskAboutClinic={handleAskAboutClinic}
+                    onAskQuestion={handleAskInspectorQuestion}
+                    onOpenDetails={onOpenDetails}
                     onRequestPlaceDetails={onRequestPlaceDetails}
                   />
                 )}
@@ -782,60 +873,210 @@ export function AgentSidebar({
         <div ref={threadEndRef} />
       </div>
 
-      {/* Multi-Stop Sync to Google Maps Bar */}
-      {syncedSpecialists.length > 0 && googleMapsSyncUrl && mobileSnap !== 'peek' && (
+      {/* Mobile Quick Return Chip to Selected Place Details when asking questions */}
+      {selectedSpecialist && !inspectedSpecialist && mobileSnap !== 'peek' && (
+        <div className="lg:hidden px-3 py-1.5 border-t border-[var(--line)]/80 bg-[var(--surface-subtle)] flex items-center justify-between gap-2 shrink-0">
+          <span className="text-[11px] text-[var(--muted)] truncate">
+            Focused: <strong className="font-semibold text-[var(--ink)]">{selectedSpecialist.name}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenDetails(selectedSpecialist.id)}
+            className="inline-flex items-center gap-1 min-h-[36px] px-2.5 text-[11px] font-semibold text-[var(--accent-text)] bg-[var(--surface)] border border-[var(--accent)]/40 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Info className="w-3 h-3" aria-hidden="true" />
+            <span>View details</span>
+          </button>
+        </div>
+      )}
+
+      {/* Interactive Shortlist Bar (opens individual Google Maps listings or browsable list — never forces multi-stop routing) */}
+      {syncedSpecialists.length > 0 && mobileSnap !== 'peek' && (
         <div
           data-testid="maps-sync-bar"
-          className="px-3.5 py-2.5 border-t border-[var(--accent)]/30 bg-[var(--accent-soft)] shrink-0 space-y-2"
+          className="px-3.5 py-2.5 border-t border-[var(--accent)]/35 bg-[var(--accent-soft)] shrink-0 space-y-2"
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-[var(--ink)] tabular-nums truncate">
-              {syncedSpecialists.length} selected ·{' '}
-              <span className="font-normal text-[var(--muted)]">
-                {syncedSpecialists.map((s) => s.name).join(' → ')}
+            <button
+              type="button"
+              onClick={() => setShortlistOpen((v) => !v)}
+              aria-expanded={shortlistOpen}
+              className="flex items-center gap-1.5 min-w-0 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
+            >
+              <ListChecks className="w-4 h-4 text-[var(--accent-text)] shrink-0" aria-hidden="true" />
+              <span className="text-xs font-semibold text-[var(--ink)] tabular-nums truncate">
+                Shortlist ({syncedSpecialists.length})
               </span>
-            </p>
+              {syncedSpecialists.length > 1 &&
+                (shortlistOpen ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" aria-hidden="true" />
+                ) : (
+                  <ChevronUp className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" aria-hidden="true" />
+                ))}
+            </button>
             <button
               type="button"
               onClick={onClearSynced}
-              aria-label="Clear selection"
-              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[28px] sm:min-h-[28px] -mr-2 sm:mr-0 rounded-md text-[var(--muted)] hover:text-[var(--ink)] shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+              aria-label="Clear shortlist"
+              className="inline-flex items-center justify-center gap-1 min-w-[44px] min-h-[36px] sm:min-w-0 sm:min-h-[26px] px-1.5 text-[11px] font-medium rounded-md text-[var(--muted)] hover:text-[var(--ink)] shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
             >
+              <span>Clear</span>
               <X className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <a
-              href={googleMapsSyncUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid="maps-sync-open-link"
-              className="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[36px] px-3 text-xs font-semibold text-[var(--accent-ink)] bg-[var(--accent)] hover:opacity-90 active:scale-[0.98] rounded-lg transition-opacity whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+          {/* Individual Shortlist Items: 1-tap open exact place on Google Maps or inspect details */}
+          {shortlistOpen && syncedSpecialists.length > 1 && (
+            <ul
+              role="list"
+              aria-label="Shortlisted places"
+              className="max-h-[136px] agent-scroll rounded-lg border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--line)]/70"
             >
-              <span>Open in Google Maps</span>
-              <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-            </a>
+              {syncedSpecialists.map((item, idx) => {
+                const placeHref = buildPlaceDetailsUrl(item);
+                return (
+                  <li
+                    key={item.id}
+                    className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenDetails(item.id)}
+                      className="min-w-0 flex-1 text-left cursor-pointer hover:text-[var(--accent-text)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
+                    >
+                      <span className="font-mono text-[10px] font-semibold text-[var(--muted)] mr-1.5">
+                        #{idx + 1}
+                      </span>
+                      <span className="font-medium text-[var(--ink)] truncate">
+                        {item.name}
+                      </span>
+                      {item.rating != null && (
+                        <span className="ml-1.5 text-[11px] text-[var(--muted)] tabular-nums">
+                          {item.rating.toFixed(1)}★
+                        </span>
+                      )}
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {placeHref && (
+                        <a
+                          href={placeHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-0.5 min-h-[32px] sm:min-h-[24px] px-2 text-[11px] font-semibold text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] rounded transition-colors whitespace-nowrap"
+                        >
+                          <span>Maps</span>
+                          <ExternalLink className="w-2.5 h-2.5" aria-hidden="true" />
+                          <span className="sr-only"> listing for {item.name}</span>
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onToggleSyncId(item.id)}
+                        aria-label={`Remove ${item.name} from shortlist`}
+                        className="inline-flex items-center justify-center min-w-[28px] min-h-[28px] sm:min-w-[22px] sm:min-h-[22px] text-[var(--muted)] hover:text-[var(--ink)] rounded cursor-pointer"
+                      >
+                        <X className="w-3 h-3" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
 
-            <button
-              type="button"
-              onClick={handleCopySyncLink}
-              data-testid="maps-sync-copy-btn"
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[36px] px-3 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.98] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-            >
-              {copiedLink ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-[var(--accent-text)]" aria-hidden="true" />
-                  <span>Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Copy</span>
-                </>
+          {/* Action Buttons */}
+          {syncedSpecialists.length === 1 ? (
+            <div className="flex items-center gap-1.5">
+              {singleShortlistPlaceUrl && (
+                <a
+                  href={singleShortlistPlaceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="maps-sync-open-link"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] px-3 text-xs font-semibold text-[var(--accent-ink)] bg-[var(--accent)] hover:opacity-90 active:scale-[0.98] rounded-lg transition-opacity whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                >
+                  <span>Open on Google Maps</span>
+                  <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                </a>
               )}
-            </button>
-          </div>
+              {singleShortlistRouteUrl && (
+                <a
+                  href={singleShortlistRouteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] rounded-lg whitespace-nowrap shrink-0"
+                >
+                  <Navigation className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Route</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={handleCopyShortlist}
+                data-testid="maps-sync-copy-btn"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.98] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-[var(--accent-text)]" aria-hidden="true" />
+                    <span>Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleCopyShortlist}
+                data-testid="maps-sync-copy-btn"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] px-3 text-xs font-semibold text-[var(--accent-ink)] bg-[var(--accent)] hover:opacity-90 active:scale-[0.98] rounded-lg transition-opacity whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Copied shortlist</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Copy shortlist</span>
+                  </>
+                )}
+              </button>
+
+              {shortlistListSearchUrl && (
+                <a
+                  href={shortlistListSearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="maps-sync-open-link"
+                  className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-semibold text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] active:scale-[0.98] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                >
+                  <span>Maps list</span>
+                  <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                </a>
+              )}
+
+              {multiStopRouteUrl && (
+                <a
+                  href={multiStopRouteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Plot a multi-stop route visiting all shortlisted places"
+                  className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[34px] px-2.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--ink)] bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--accent)] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                >
+                  <Navigation className="w-3 h-3" aria-hidden="true" />
+                  <span>Route all</span>
+                </a>
+              )}
+            </div>
+          )}
         </div>
       )}
 

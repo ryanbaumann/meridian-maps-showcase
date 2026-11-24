@@ -80,6 +80,7 @@ export interface PlaceDetailsInsightsResponse {
   phoneNumber?: string;
   websiteUri?: string;
   googleMapsUri?: string;
+  reviewsUri?: string;
   needsClientDetailsFallback?: boolean;
   quotaExceeded?: boolean;
   error?: string;
@@ -116,7 +117,7 @@ export interface SpecialistScoreBreakdown {
 
 export interface SynthesisPick {
   specialistId: string;
-  rank: 1 | 2 | 3;
+  rank: number;
   badge: string;
   rationale: string;
   reviewSnippet?: string;
@@ -160,6 +161,7 @@ export interface Specialist {
   websiteUri?: string;
   googleMapsUri?: string;
   directionsUri?: string;
+  reviewsUri?: string;
   photo?: PlacePhotoInfo;
   travelDurationSeconds: number | null;
   distanceMeters: number | null;

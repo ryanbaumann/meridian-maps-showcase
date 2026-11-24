@@ -275,7 +275,7 @@ export function PhotorealisticMap3D({
         altitudeMode: meshMode,
         // glTF +Y up -> Maps 3D +Z up via tilt: 270
         orientation: { heading: routeHeading, tilt: 270, roll: 0 },
-        scale: 5.5,
+        scale: 9.0,
       });
 
       const onBeaconClick = () => {
@@ -297,7 +297,7 @@ export function PhotorealisticMap3D({
         position: { lat: originLat, lng: originLng, altitude: 3 },
         altitudeMode: meshMode,
         orientation: { heading: routeHeading, tilt: 270, roll: 0 },
-        scale: 4.2,
+        scale: 7.0,
       });
       map3d.appendChild(originModel);
       modelsRef.current.push(originModel);
@@ -309,7 +309,7 @@ export function PhotorealisticMap3D({
     };
   }, [maps3dLib, originLat, originLng, focusedId, focusedLat, focusedLng]);
 
-  // Sync 3D markers independently of async route polyline & .glb model resolution
+  // Sync high-contrast custom 3D markers independently of async route polyline & .glb resolution
   useEffect(() => {
     const map3d = map3dRef.current;
     if (!map3d || !maps3dLib) return;
@@ -320,30 +320,73 @@ export function PhotorealisticMap3D({
     const MarkerInteractive = maps3dLib.Marker3DInteractiveElement;
     const MarkerBasic = maps3dLib.Marker3DElement;
     const PinElement = markerLib?.PinElement;
-    const hasCustomModels = Boolean(
-      maps3dLib.Model3DInteractiveElement || maps3dLib.Model3DElement
-    );
     const relativeMode = maps3dLib.AltitudeMode?.RELATIVE_TO_GROUND ?? 'RELATIVE_TO_GROUND';
-    const meshMode = maps3dLib.AltitudeMode?.RELATIVE_TO_MESH ?? relativeMode;
     const syncedSet = new Set(syncedIds);
+
+    // Custom high-contrast obsidian + teal compass SVG template for Start marker (never default red)
+    const buildOriginSvgTemplate = (): HTMLTemplateElement | null => {
+      if (typeof document === 'undefined') return null;
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const tpl = document.createElement('template');
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('xmlns', svgNS);
+      svg.setAttribute('width', '40');
+      svg.setAttribute('height', '40');
+      svg.setAttribute('viewBox', '0 0 40 40');
+
+      const outerRing = document.createElementNS(svgNS, 'circle');
+      outerRing.setAttribute('cx', '20');
+      outerRing.setAttribute('cy', '20');
+      outerRing.setAttribute('r', '18');
+      outerRing.setAttribute('fill', '#0f172a');
+      outerRing.setAttribute('stroke', '#ffffff');
+      outerRing.setAttribute('stroke-width', '3.5');
+
+      const tealRing = document.createElementNS(svgNS, 'circle');
+      tealRing.setAttribute('cx', '20');
+      tealRing.setAttribute('cy', '20');
+      tealRing.setAttribute('r', '10');
+      tealRing.setAttribute('fill', '#14b8a6');
+      tealRing.setAttribute('stroke', '#ffffff');
+      tealRing.setAttribute('stroke-width', '2');
+
+      const core = document.createElementNS(svgNS, 'circle');
+      core.setAttribute('cx', '20');
+      core.setAttribute('cy', '20');
+      core.setAttribute('r', '4');
+      core.setAttribute('fill', '#ffffff');
+
+      svg.append(outerRing, tealRing, core);
+      tpl.content.append(svg);
+      return tpl;
+    };
 
     if (origin && (MarkerBasic || MarkerInteractive)) {
       const Ctor = MarkerBasic ?? MarkerInteractive!;
       const originMarker = new Ctor({
-        position: { lat: origin.lat, lng: origin.lng, altitude: hasCustomModels ? 10 : 16 },
-        altitudeMode: hasCustomModels ? meshMode : relativeMode,
+        position: { lat: origin.lat, lng: origin.lng, altitude: 26 },
+        altitudeMode: relativeMode,
         label: 'Start',
-        extruded: !hasCustomModels,
+        extruded: true,
+        drawsWhenOccluded: true,
+        sizePreserved: true,
+        zIndex: 80,
       });
-      if (PinElement && !hasCustomModels) {
+
+      const originSvgTpl = MarkerBasic ? buildOriginSvgTemplate() : null;
+      if (originSvgTpl) {
+        originMarker.appendChild(originSvgTpl);
+      } else if (PinElement) {
         const pin = new PinElement({
           background: '#0f172a',
           borderColor: '#ffffff',
-          glyphColor: '#ffffff',
-          scale: 0.95,
+          glyphColor: '#2dd4bf',
+          glyphText: 'S',
+          scale: 1.2,
         });
         originMarker.appendChild(pin);
       }
+
       map3d.appendChild(originMarker);
       markersRef.current.push(originMarker);
     }
@@ -352,33 +395,62 @@ export function PhotorealisticMap3D({
       const rank = index + 1;
       const isSelected = specialist.id === selectedId;
       const isSynced = syncedSet.has(specialist.id);
+      const isTopThree = rank <= 3;
       const Ctor = MarkerInteractive ?? MarkerBasic;
       if (!Ctor) return;
 
       const labelPrefix = isSynced ? `✓ #${rank}` : `#${rank}`;
-      const uses3DModel = isSelected && hasCustomModels;
 
       const marker = new Ctor({
         position: {
           lat: specialist.location.lat,
           lng: specialist.location.lng,
-          altitude: uses3DModel ? 26 : 18,
+          altitude: isSelected ? 44 : isSynced ? 34 : isTopThree ? 28 : 22,
         },
-        altitudeMode: uses3DModel ? meshMode : relativeMode,
+        altitudeMode: relativeMode,
         label: `${labelPrefix} · ${formatTravelTime(specialist.travelDurationSeconds)}`,
         title: specialist.name,
-        extruded: !uses3DModel,
+        extruded: true,
+        drawsWhenOccluded: isSelected || isSynced || isTopThree,
+        sizePreserved: true,
+        zIndex: isSelected ? 100 : isSynced ? 70 : Math.max(20, 60 - index),
       });
 
-      // Let the sculpted 3D Beacon stand cleanly on the focused building while unselected places show pins
-      if (PinElement && !uses3DModel) {
-        const pin = new PinElement({
-          background: isSelected ? '#0f766e' : isSynced ? '#0f172a' : '#ffffff',
-          borderColor: isSelected ? '#134e4a' : isSynced ? '#ffffff' : '#0f172a',
-          glyphColor: isSelected || isSynced ? '#ffffff' : '#0f172a',
-          glyphText: String(rank),
-          scale: isSelected ? 1.2 : 1.0,
-        });
+      // Always attach a high-contrast custom PinElement so Maps 3D never falls back to default red pins
+      if (PinElement) {
+        const pin = new PinElement(
+          isSelected
+            ? {
+                background: '#0d9488',
+                borderColor: '#ffffff',
+                glyphColor: '#ffffff',
+                glyphText: String(rank),
+                scale: 1.45,
+              }
+            : isSynced
+              ? {
+                  background: '#1e1b4b',
+                  borderColor: '#fbbf24',
+                  glyphColor: '#fbbf24',
+                  glyphText: `✓${rank}`,
+                  scale: 1.25,
+                }
+              : isTopThree
+                ? {
+                    background: '#0f172a',
+                    borderColor: '#ffffff',
+                    glyphColor: '#2dd4bf',
+                    glyphText: String(rank),
+                    scale: 1.2,
+                  }
+                : {
+                    background: '#1e293b',
+                    borderColor: '#f8fafc',
+                    glyphColor: '#ffffff',
+                    glyphText: String(rank),
+                    scale: 1.0,
+                  }
+        );
         marker.appendChild(pin);
       }
 
@@ -407,10 +479,10 @@ export function PhotorealisticMap3D({
 
     const clampMode = maps3dLib.AltitudeMode?.CLAMP_TO_GROUND ?? 'CLAMP_TO_GROUND';
     const polyline = new maps3dLib.Polyline3DElement({
-      strokeColor: '#0d9488',
-      outerColor: '#ffffff',
-      outerWidth: 0.35,
-      strokeWidth: 8,
+      strokeColor: '#14b8a6',
+      outerColor: '#0f172a',
+      outerWidth: 0.4,
+      strokeWidth: 11,
       altitudeMode: clampMode,
       drawsOccludedSegments: true,
     });

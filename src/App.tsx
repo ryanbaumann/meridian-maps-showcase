@@ -51,6 +51,7 @@ export default function App() {
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [rawSpecialists, setRawSpecialists] = useState<Specialist[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [syncedIds, setSyncedIds] = useState<string[]>([]);
 
@@ -101,6 +102,17 @@ export default function App() {
     () => rankSpecialists(rawSpecialists, sortMode),
     [rawSpecialists, sortMode]
   );
+
+  const inspectedSpecialist = useMemo(
+    () => rankedSpecialists.find((s) => s.id === inspectedId) ?? null,
+    [rankedSpecialists, inspectedId]
+  );
+
+  const inspectedRank = useMemo(() => {
+    if (!inspectedSpecialist) return 1;
+    const idx = rankedSpecialists.findIndex((s) => s.id === inspectedSpecialist.id);
+    return idx >= 0 ? idx + 1 : 1;
+  }, [rankedSpecialists, inspectedSpecialist]);
 
   const runAgentRequest = useCallback(
     async (opts: {
@@ -627,19 +639,26 @@ export default function App() {
     []
   );
 
-  const handleSelectSpecialistFromMap = useCallback((id: string | null) => {
-    setSelectedId(id);
-    if (id) {
-      setCamera3DView((prev) => (prev === 'free' || prev === 'orbit' ? 'corridor' : prev));
-    }
-    if (id && window.innerWidth < 1024) {
-      setMobileSnap('peek');
-    }
-  }, []);
+  const handleSelectSpecialistFromMap = useCallback(
+    (id: string | null) => {
+      setSelectedId(id);
+      if (id) {
+        setCamera3DView((prev) => (prev === 'free' || prev === 'orbit' ? 'corridor' : prev));
+        setInspectedId((prev) => (prev ? id : prev));
+      } else {
+        setInspectedId(null);
+      }
+      if (id && window.innerWidth < 1024) {
+        setMobileSnap('peek');
+      }
+    },
+    []
+  );
 
   const handleSelectSpecialistFromSidebar = useCallback((id: string) => {
     setSelectedId(id);
     setCamera3DView((prev) => (prev === 'free' || prev === 'orbit' ? 'corridor' : prev));
+    setInspectedId((prev) => (prev ? id : prev));
   }, []);
 
   const handleRequestPlaceDetails = useCallback(async (placeId: string) => {
@@ -762,6 +781,7 @@ export default function App() {
                 phoneNumber: details?.phoneNumber ?? item.phoneNumber,
                 websiteUri: details?.websiteUri ?? item.websiteUri,
                 googleMapsUri: details?.googleMapsUri ?? item.googleMapsUri,
+                reviewsUri: details?.reviewsUri ?? item.reviewsUri,
                 detailsLoaded: true,
               }
             : item
@@ -794,6 +814,23 @@ export default function App() {
     setSyncedIds(rankedSpecialists.slice(0, 3).map((s) => s.id));
   }, [rankedSpecialists]);
 
+  const handleOpenDetails = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      setInspectedId(id);
+      setCamera3DView((prev) => (prev === 'free' || prev === 'orbit' ? 'corridor' : prev));
+      handleRequestPlaceDetails(id);
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        setMobileSnap('full');
+      }
+    },
+    [handleRequestPlaceDetails]
+  );
+
+  const handleCloseDetails = useCallback(() => {
+    setInspectedId(null);
+  }, []);
+
   const handleReset = useCallback(() => {
     activeRequestAbortRef.current?.abort();
     requestSeqRef.current += 1;
@@ -802,6 +839,7 @@ export default function App() {
     setTurns([]);
     setRawSpecialists([]);
     setSelectedId(null);
+    setInspectedId(null);
     setHoveredId(null);
     setSyncedIds([]);
     setCamera3DView('corridor');
@@ -869,12 +907,14 @@ export default function App() {
               open={sidebarOpen}
               mobileSnap={mobileSnap}
               origin={origin}
+              activeSpecialty={activeSpecialty}
               travelMode={travelMode}
               sortMode={sortMode}
               resolvedTheme={resolvedTheme}
               turns={turns}
               specialists={rankedSpecialists}
               selectedId={selectedId}
+              inspectedId={inspectedId}
               syncedIds={syncedIds}
               loadingDetailsId={loadingDetailsId}
               isLoading={isLoading}
@@ -886,6 +926,8 @@ export default function App() {
               onSetLocationText={handleSetLocationText}
               onChangeSortMode={setSortMode}
               onSelectSpecialist={handleSelectSpecialistFromSidebar}
+              onOpenDetails={handleOpenDetails}
+              onCloseDetails={handleCloseDetails}
               onHoverSpecialist={setHoveredId}
               onToggleSyncId={handleToggleSyncId}
               onSelectTopThree={handleSelectTopThree}
@@ -894,20 +936,30 @@ export default function App() {
               onReset={handleReset}
             />
 
-            <div className="order-1 lg:order-2 relative flex-1 min-w-0 min-h-[104px] lg:min-h-0">
+            <div className="order-1 lg:order-2 relative flex-1 min-w-0 min-h-[112px] lg:min-h-0">
               <SpecialistMap
                 origin={origin}
                 specialists={rankedSpecialists}
                 selectedId={selectedId}
+                inspectedSpecialist={inspectedSpecialist}
+                inspectedRank={inspectedRank}
+                isLoadingDetails={Boolean(inspectedId && loadingDetailsId === inspectedId)}
                 hoveredId={hoveredId}
                 syncedIds={syncedIds}
                 travelMode={travelMode}
                 mapViewMode={mapViewMode}
                 camera3DView={camera3DView}
                 resolvedTheme={resolvedTheme}
+                hideSecondaryControlsOnMobile={mobileSnap === 'full'}
+                sidebarCollapsed={!sidebarOpen}
                 onToggleTheme={toggleTheme}
                 onChangeCamera3DView={setCamera3DView}
                 onSelectSpecialist={handleSelectSpecialistFromMap}
+                onOpenDetails={handleOpenDetails}
+                onCloseDetails={handleCloseDetails}
+                onToggleSyncId={handleToggleSyncId}
+                onAskQuestion={(q) => runAgentRequest({ message: q })}
+                onRequestPlaceDetails={handleRequestPlaceDetails}
                 onChangeTravelMode={handleChangeTravelMode}
                 onChangeMapViewMode={handleChangeMapViewMode}
                 onRouteMetricsUpdate={handleRouteMetricsUpdate}

@@ -1,13 +1,5 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import {
-  ArrowRight,
-  Check,
-  ChevronRight,
-  Clock,
-  LocateFixed,
-  Navigation,
-  Star,
-} from 'lucide-react';
+import { ArrowRight, LocateFixed } from 'lucide-react';
 import type { ResolvedTheme } from '../hooks/useTheme.ts';
 import type {
   GenUiBlock,
@@ -17,12 +9,7 @@ import type {
   Specialist,
   TravelMode,
 } from '../types.ts';
-import { getTodayHoursSummary } from '../utils/agentLogic.ts';
-import { toGoogleMapsUrlTravelMode } from '../utils/mapsSync.ts';
-import { formatDistance, formatTravelTime } from '../utils/ranking.ts';
 import { buildRankedSynthesis } from '../utils/synthesis.ts';
-import { safeExternalUrl } from '../utils/url.ts';
-import { A2uiPlaceCard } from './A2uiPlaceCard.tsx';
 import { PlaceDetailView } from './PlaceDetailView.tsx';
 import { SynthesisSummaryCard } from './SynthesisSummaryCard.tsx';
 
@@ -47,13 +34,9 @@ interface GenUiBlockRendererProps {
   onUseGps: () => void;
   onSubmitLocationText: (locationText: string) => void;
   onAskAboutClinic: (specialist: Specialist) => void;
+  onAskQuestion: (question: string) => void;
+  onOpenDetails: (id: string) => void;
   onRequestPlaceDetails: (id: string) => void;
-}
-
-function getTravelModeShortLabel(mode: TravelMode): string {
-  if (mode === 'WALK') return 'walk';
-  if (mode === 'BICYCLE') return 'bike';
-  return 'drive';
 }
 
 export function GenUiBlockRenderer({
@@ -63,7 +46,6 @@ export function GenUiBlockRenderer({
   origin,
   travelMode,
   sortMode,
-  resolvedTheme,
   isLatestTurn,
   selectedId,
   syncedSet,
@@ -77,19 +59,17 @@ export function GenUiBlockRenderer({
   onUseGps,
   onSubmitLocationText,
   onAskAboutClinic,
+  onAskQuestion,
+  onOpenDetails,
   onRequestPlaceDetails,
 }: GenUiBlockRendererProps) {
   const inlineLocationId = useId();
   const windowScrollRef = useRef<HTMLDivElement | null>(null);
   const [showAllCards, setShowAllCards] = useState(false);
-  const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [inlineLocation, setInlineLocation] = useState('');
 
-  const openDetailInWindow = (id: string) => {
-    setInspectedId(id);
-    onFocusSpecialist(id);
-    onRequestPlaceDetails(id);
-    windowScrollRef.current?.scrollTo({ top: 0 });
+  const openDetailInInspector = (id: string) => {
+    onOpenDetails(id);
   };
 
   if (block.type === 'location_prompt') {
@@ -166,6 +146,7 @@ export function GenUiBlockRenderer({
           isLoadingDetails={loadingDetailsId === clinic.id}
           onToggleSync={onToggleSyncId}
           onAskAboutClinic={onAskAboutClinic}
+          onAskQuestion={onAskQuestion}
           onRequestDetails={onRequestPlaceDetails}
         />
       </div>
@@ -178,10 +159,6 @@ export function GenUiBlockRenderer({
       .filter((s): s is Specialist => Boolean(s));
     if (items.length < 2) return null;
 
-    const inspectedClinic = inspectedId
-      ? items.find((item) => item.id === inspectedId) ?? null
-      : null;
-
     const activeComparisonSynthesis =
       synthesis ??
       buildRankedSynthesis({
@@ -190,192 +167,36 @@ export function GenUiBlockRenderer({
         originLabel: origin?.label,
         sortMode,
         travelMode,
+        maxPicks: items.length,
       });
 
     return (
-      <div className="space-y-2.5">
-        {!inspectedClinic && activeComparisonSynthesis && (
+      <div
+        ref={windowScrollRef}
+        data-testid="genui-comparison"
+        className="lg:max-h-[460px] lg:agent-scroll rounded-xl"
+      >
+        {activeComparisonSynthesis && (
           <SynthesisSummaryCard
             synthesis={activeComparisonSynthesis}
             specialists={items}
+            origin={origin}
             selectedId={selectedId}
+            syncedSet={syncedSet}
             travelMode={travelMode}
             onSelectSpecialist={onFocusSpecialist}
-            onInspectDetails={openDetailInWindow}
+            onHoverSpecialist={onHoverSpecialist}
+            onToggleSyncId={onToggleSyncId}
+            onInspectDetails={openDetailInInspector}
+            onAskAboutSpecialist={onAskAboutClinic}
           />
         )}
-        <div
-          ref={windowScrollRef}
-          data-testid="genui-comparison"
-          className="lg:max-h-[380px] lg:agent-scroll rounded-xl border border-[var(--line)] bg-[var(--surface)]"
-        >
-        {inspectedClinic ? (
-          <PlaceDetailView
-            specialist={inspectedClinic}
-            rank={globalRankFor(inspectedClinic.id, 0)}
-            origin={origin}
-            travelMode={travelMode}
-            isSynced={syncedSet.has(inspectedClinic.id)}
-            isLoadingDetails={loadingDetailsId === inspectedClinic.id}
-            backLabel="Back to comparison"
-            onBack={() => setInspectedId(null)}
-            onToggleSync={onToggleSyncId}
-            onAskAboutClinic={onAskAboutClinic}
-            onRequestDetails={onRequestPlaceDetails}
-          />
-        ) : (
-          <>
-            <div className="sticky top-0 z-10 px-3 py-2 bg-[var(--surface-subtle)] border-b border-[var(--line)] flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold text-[var(--ink)]">
-                {block.title || 'Comparison'}
-              </h2>
-              <span className="text-[11px] text-[var(--muted)] tabular-nums">
-                {items.length} options
-              </span>
-            </div>
-
-            <ul role="list" className="divide-y divide-[var(--line)]/70">
-              {items.map((clinic, idx) => {
-                const rank = globalRankFor(clinic.id, idx);
-                const isSynced = syncedSet.has(clinic.id);
-                const isFocused = clinic.id === selectedId;
-                const todayHours = getTodayHoursSummary(clinic.weekdayDescriptions);
-                const reviewSnippet = (clinic.topReviews?.[0]?.text || clinic.reviews?.[0]?.text || '').trim();
-                const dirHref =
-                  safeExternalUrl(clinic.directionsUri) ||
-                  (origin
-                    ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${clinic.location.lat},${clinic.location.lng}&travelmode=${toGoogleMapsUrlTravelMode(travelMode)}`
-                    : safeExternalUrl(clinic.googleMapsUri));
-
-                return (
-                  <li
-                    key={clinic.id}
-                    onMouseEnter={() => onHoverSpecialist(clinic.id)}
-                    onMouseLeave={() => onHoverSpecialist(null)}
-                    className={`p-3 space-y-1.5 transition-colors ${
-                      isFocused ? 'bg-[var(--accent-soft)]' : 'hover:bg-[var(--surface-subtle)]/60'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <button
-                          type="button"
-                          role="checkbox"
-                          aria-checked={isSynced}
-                          aria-label={`Shortlist ${clinic.name}`}
-                          onClick={() => onToggleSyncId(clinic.id)}
-                          className={`relative before:absolute before:-inset-3 sm:before:-inset-2 flex items-center justify-center w-5 h-5 rounded border transition-colors shrink-0 cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
-                            isSynced
-                              ? 'bg-[var(--ink)] border-[var(--ink)] text-[var(--surface)]'
-                              : 'bg-[var(--surface)] border-[var(--control-line)] text-transparent hover:border-[var(--accent)]'
-                          }`}
-                        >
-                          <Check className="w-3 h-3 stroke-[2.75]" aria-hidden="true" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onFocusSpecialist(clinic.id)}
-                          className="flex items-center gap-1.5 min-w-0 min-h-[44px] sm:min-h-[28px] text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] rounded"
-                        >
-                          <span className="font-mono text-[11px] font-semibold text-[var(--muted)] tabular-nums shrink-0">
-                            #{rank}
-                          </span>
-                          <span className="text-xs font-semibold text-[var(--ink)] truncate">
-                            {clinic.name}
-                          </span>
-                        </button>
-                      </div>
-
-                      <span className="font-mono text-xs font-semibold text-[var(--accent-text)] tabular-nums whitespace-nowrap shrink-0">
-                        {formatTravelTime(clinic.travelDurationSeconds)}
-                      </span>
-                    </div>
-
-                    <div className="pl-7 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--muted)] tabular-nums">
-                      {clinic.rating != null && (
-                        <span className="inline-flex items-center gap-0.5 font-medium text-[var(--ink)]">
-                          <Star
-                            className="w-3 h-3 fill-amber-500 text-amber-500"
-                            aria-hidden="true"
-                          />
-                          {clinic.rating.toFixed(1)} ({clinic.userRatingCount.toLocaleString()})
-                        </span>
-                      )}
-                      <span aria-hidden="true" className="opacity-50">
-                        ·
-                      </span>
-                      <span>
-                        {formatDistance(clinic.distanceMeters)}{' '}
-                        {getTravelModeShortLabel(travelMode)}
-                      </span>
-                      {clinic.openNow !== null && (
-                        <>
-                          <span aria-hidden="true" className="opacity-50">
-                            ·
-                          </span>
-                          <span
-                            className="font-medium"
-                            style={{
-                              color: clinic.openNow ? 'var(--status-open)' : 'var(--muted)',
-                            }}
-                          >
-                            {clinic.openNow ? 'Open' : 'Closed'}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    {todayHours && (
-                      <div className="pl-7 flex items-center gap-1 text-[11px] text-[var(--muted)] tabular-nums">
-                        <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
-                        <span className="truncate">Today {todayHours}</span>
-                      </div>
-                    )}
-
-                    {reviewSnippet && (
-                      <p className="pl-7 text-[11px] text-[var(--muted)] leading-snug line-clamp-2">
-                        “{reviewSnippet}”
-                      </p>
-                    )}
-
-                    <div className="pl-7 flex items-center justify-between gap-2 pt-0.5 text-[11px]">
-                      {dirHref ? (
-                        <a
-                          href={dirHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-0 px-1.5 sm:px-0 font-semibold text-[var(--accent-text)] hover:underline whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
-                        >
-                          <Navigation className="w-3 h-3" aria-hidden="true" />
-                          <span>Route</span>
-                          <span className="sr-only"> to {clinic.name}</span>
-                        </a>
-                      ) : (
-                        <span />
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => openDetailInWindow(clinic.id)}
-                        className="inline-flex items-center gap-0.5 min-h-[44px] sm:min-h-0 font-semibold text-[var(--ink)] hover:text-[var(--accent-text)] whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
-                      >
-                        <span>Details</span>
-                        <span className="sr-only"> for {clinic.name}</span>
-                        <ChevronRight className="w-3 h-3" aria-hidden="true" />
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </>
-        )}
-        </div>
       </div>
     );
   }
 
-  // Default: Bounded 3-Option Scroll Window with In-Window Next-Level Detail View
+  // Unified Ranked Results Window: single visual synthesis list (no duplicate cards)
+  // with inline sort controls, shortlist checkboxes, expandable "more" options, and in-window Details.
   const orderedCards = (() => {
     const idSet = new Set(block.specialistIds);
     const liveMatches = specialists.filter((s) => idSet.has(s.id));
@@ -389,47 +210,28 @@ export function GenUiBlockRenderer({
 
   if (orderedCards.length === 0) return null;
 
-  const visibleCards = showAllCards ? orderedCards : orderedCards.slice(0, 3);
-  const hiddenCount = orderedCards.length - visibleCards.length;
-  const inspectedClinic = inspectedId
-    ? orderedCards.find((item) => item.id === inspectedId) ?? null
-    : null;
+  const visibleCount = showAllCards ? orderedCards.length : Math.min(3, orderedCards.length);
+  const hiddenCount = orderedCards.length - visibleCount;
 
-  const activeSynthesis = isLatestTurn
-    ? buildRankedSynthesis({
-        specialists: orderedCards,
-        specialistQuery: orderedCards[0]?.specialty,
-        originLabel: origin?.label,
-        sortMode,
-        travelMode,
-      }) ?? synthesis
-    : synthesis;
+  const activeSynthesis =
+    buildRankedSynthesis({
+      specialists: orderedCards,
+      specialistQuery: orderedCards[0]?.specialty || block.title,
+      originLabel: origin?.label,
+      sortMode,
+      travelMode,
+      maxPicks: visibleCount,
+    }) ?? synthesis;
 
   return (
-    <div className="space-y-2.5" data-testid="specialist-list">
-      {!inspectedClinic && activeSynthesis && (
-        <SynthesisSummaryCard
-          synthesis={activeSynthesis}
-          specialists={orderedCards}
-          selectedId={selectedId}
-          travelMode={travelMode}
-          onSelectSpecialist={onFocusSpecialist}
-          onInspectDetails={openDetailInWindow}
-        />
-      )}
-
+    <div className="space-y-2" data-testid="specialist-list">
+      {/* Compact Controls Strip: Count, Quick Shortlist, Sort Switcher */}
       <div className="flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex items-center gap-1.5 text-xs">
-          <h2 className="font-semibold text-[var(--ink)]">
-            {block.title || `${orderedCards.length} matches`}
-          </h2>
-          <span aria-hidden="true" className="text-[var(--muted)] opacity-50">
-            ·
-          </span>
-          <span className="text-[var(--muted)] tabular-nums">
+          <span className="font-medium text-[var(--muted)] tabular-nums">
             {showAllCards
               ? `${orderedCards.length} of ${orderedCards.length}`
-              : `Top ${visibleCards.length} of ${orderedCards.length}`}
+              : `Top ${visibleCount} of ${orderedCards.length}`}
           </span>
           {isLatestTurn && orderedCards.length >= 2 && (
             <>
@@ -441,7 +243,7 @@ export function GenUiBlockRenderer({
                 onClick={onSelectTopThree}
                 className="inline-flex items-center min-h-[44px] sm:min-h-0 font-medium text-[var(--accent-text)] hover:underline whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)] rounded"
               >
-                Select top {Math.min(3, orderedCards.length)}
+                Shortlist top {Math.min(3, orderedCards.length)}
               </button>
             </>
           )}
@@ -481,60 +283,38 @@ export function GenUiBlockRenderer({
         )}
       </div>
 
-      {/* Desktop Contained Scroll Window / Seamless Full-Height Flow on Mobile */}
+      {/* Single Unified Window: Desktop Contained Scroll / Mobile Seamless Flow */}
       <div
         ref={windowScrollRef}
         data-testid="options-scroll-window"
-        className="lg:max-h-[540px] lg:agent-scroll rounded-xl border border-[var(--line)] bg-[var(--bg)]/70 p-2 space-y-2"
+        className="lg:max-h-[540px] lg:agent-scroll space-y-2 rounded-xl"
       >
-        {inspectedClinic ? (
-          <PlaceDetailView
-            specialist={inspectedClinic}
-            rank={globalRankFor(inspectedClinic.id, 0)}
+        {activeSynthesis && (
+          <SynthesisSummaryCard
+            synthesis={activeSynthesis}
+            specialists={orderedCards}
             origin={origin}
+            selectedId={selectedId}
+            syncedSet={syncedSet}
             travelMode={travelMode}
-            isSynced={syncedSet.has(inspectedClinic.id)}
-            isLoadingDetails={loadingDetailsId === inspectedClinic.id}
-            backLabel={`Back to ${visibleCards.length} options`}
-            onBack={() => setInspectedId(null)}
-            onToggleSync={onToggleSyncId}
-            onAskAboutClinic={onAskAboutClinic}
-            onRequestDetails={onRequestPlaceDetails}
+            onSelectSpecialist={onFocusSpecialist}
+            onHoverSpecialist={onHoverSpecialist}
+            onToggleSyncId={onToggleSyncId}
+            onInspectDetails={openDetailInInspector}
+            onAskAboutSpecialist={onAskAboutClinic}
           />
-        ) : (
-          <>
-            <ul role="list" className="space-y-2">
-              {visibleCards.map((clinic, idx) => (
-                <li key={clinic.id}>
-                  <A2uiPlaceCard
-                    specialist={clinic}
-                    rank={globalRankFor(clinic.id, idx)}
-                    origin={origin}
-                    travelMode={travelMode}
-                    resolvedTheme={resolvedTheme}
-                    isFocused={clinic.id === selectedId}
-                    isSynced={syncedSet.has(clinic.id)}
-                    onFocus={onFocusSpecialist}
-                    onOpenDetails={openDetailInWindow}
-                    onHover={onHoverSpecialist}
-                    onToggleSync={onToggleSyncId}
-                  />
-                </li>
-              ))}
-            </ul>
+        )}
 
-            {orderedCards.length > 3 && (
-              <button
-                type="button"
-                onClick={() => setShowAllCards((v) => !v)}
-                className="w-full min-h-[44px] sm:min-h-[34px] text-xs font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
-              >
-                {showAllCards
-                  ? 'Show top 3 only'
-                  : `Browse ${hiddenCount} more inside this window`}
-              </button>
-            )}
-          </>
+        {orderedCards.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setShowAllCards((v) => !v)}
+            className="w-full min-h-[44px] sm:min-h-[34px] text-xs font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+          >
+            {showAllCards
+              ? 'Show top 3 only'
+              : `Show ${hiddenCount} more options`}
+          </button>
         )}
       </div>
     </div>

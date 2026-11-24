@@ -53,6 +53,7 @@ import {
 } from './src/utils/geminiError.ts';
 import {
   buildA2uiSpecialistsBatchMessages,
+  buildGoogleMapsSearchUrl,
   isValidGooglePlaceId,
 } from './src/utils/mapsSync.ts';
 import { parseFastUserMessage, rankSpecialists } from './src/utils/ranking.ts';
@@ -141,6 +142,7 @@ async function enrichTopSpecialistsWithDetails(
       phoneNumber: details.phoneNumber ?? item.phoneNumber,
       websiteUri: details.websiteUri ?? item.websiteUri,
       googleMapsUri: details.googleMapsUri ?? item.googleMapsUri,
+      reviewsUri: details.reviewsUri ?? item.reviewsUri,
       detailsLoaded: true,
     };
   });
@@ -685,13 +687,13 @@ async function startServer() {
         }
 
         if (groundingSources.length === 0) {
-          const mapsQuery = encodeURIComponent(
-            providedOrigin ? `${userText} near ${providedOrigin.label}` : userText
-          );
+          const mapsQueryText = providedOrigin
+            ? `${userText} near ${providedOrigin.label}`
+            : userText;
           groundingSources = [
             {
               title: 'Search on Google Maps',
-              uri: `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`,
+              uri: buildGoogleMapsSearchUrl(mapsQueryText),
             },
           ];
         }

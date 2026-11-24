@@ -1,16 +1,27 @@
 import { useState } from 'react';
-import { Clock, Info, MapPin, Navigation, Star } from 'lucide-react';
-import type { RankedSynthesisResult, Specialist, TravelMode } from '../types.ts';
+import { Check, Clock, Info, MapPin, MessageSquare, Navigation, Star } from 'lucide-react';
+import type {
+  OriginLocation,
+  RankedSynthesisResult,
+  Specialist,
+  TravelMode,
+} from '../types.ts';
+import { buildPlaceDirectionsUrl } from '../utils/mapsSync.ts';
 import { formatDistance, formatTravelTime } from '../utils/ranking.ts';
 import { safeExternalUrl } from '../utils/url.ts';
 
 interface SynthesisSummaryCardProps {
   synthesis: RankedSynthesisResult;
   specialists: Specialist[];
+  origin: OriginLocation | null;
   selectedId: string | null;
+  syncedSet: Set<string>;
   travelMode: TravelMode;
   onSelectSpecialist: (id: string) => void;
+  onHoverSpecialist: (id: string | null) => void;
+  onToggleSyncId: (id: string) => void;
   onInspectDetails: (id: string) => void;
+  onAskAboutSpecialist?: (specialist: Specialist) => void;
 }
 
 function getInitials(name: string): string {
@@ -28,7 +39,7 @@ function PlaceThumbnail({
   rank,
 }: {
   specialist: Specialist;
-  rank: 1 | 2 | 3;
+  rank: number;
 }) {
   const [imgError, setImgError] = useState(false);
   const photo = specialist.photo;
@@ -75,7 +86,7 @@ function PlaceThumbnail({
       {/* Mandatory Places Photo Attribution when present */}
       {hasPhoto && author?.displayName && (
         <span
-          className="absolute bottom-0 inset-x-0 px-1 py-0.5 bg-black/65 text-[8px] leading-tight text-white truncate"
+          className="absolute bottom-0 inset-x-0 px-1 py-[1px] bg-black/65 text-[8px] leading-tight text-white truncate"
           title={`Photo: ${author.displayName}`}
         >
           {authorHref ? (
@@ -100,10 +111,15 @@ function PlaceThumbnail({
 export function SynthesisSummaryCard({
   synthesis,
   specialists,
+  origin,
   selectedId,
+  syncedSet,
   travelMode,
   onSelectSpecialist,
+  onHoverSpecialist,
+  onToggleSyncId,
   onInspectDetails,
+  onAskAboutSpecialist,
 }: SynthesisSummaryCardProps) {
   const byId = new Map(specialists.map((s) => [s.id, s]));
   const rows = synthesis.picks
@@ -111,8 +127,9 @@ export function SynthesisSummaryCard({
       const specialist = byId.get(pick.specialistId);
       return specialist ? { pick, specialist } : null;
     })
-    .filter((entry): entry is { pick: RankedSynthesisResult['picks'][number]; specialist: Specialist } =>
-      Boolean(entry)
+    .filter(
+      (entry): entry is { pick: RankedSynthesisResult['picks'][number]; specialist: Specialist } =>
+        Boolean(entry)
     );
 
   if (rows.length === 0) return null;
@@ -125,7 +142,7 @@ export function SynthesisSummaryCard({
       aria-label={synthesis.headline}
       className="rounded-xl border border-[var(--line)] bg-[var(--bg)] overflow-clip"
     >
-      {/* Visual Brief Header */}
+      {/* Unified Visual Brief Header */}
       <div className="px-3 py-2 border-b border-[var(--line)]/80 bg-[var(--surface-subtle)]/70 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <div className="min-w-0">
           <h2 className="font-display text-xs font-bold tracking-tight text-[var(--ink)] truncate">
@@ -159,7 +176,7 @@ export function SynthesisSummaryCard({
           <span className="inline-flex items-center gap-1">
             <span
               className="w-2 h-2 rounded-[2px] shrink-0"
-              style={{ backgroundColor: 'var(--status-open)' }}
+              style={{ backgroundColor: 'var(--chart-distance)' }}
               aria-hidden="true"
             />
             {synthesis.weights.distancePct}% Dist
@@ -167,21 +184,24 @@ export function SynthesisSummaryCard({
         </div>
       </div>
 
-      {/* Top-3 Ranked Visual Rows */}
+      {/* Unified Ranked Visual Rows */}
       <ul role="list" className="divide-y divide-[var(--line)]/75">
         {rows.map(({ pick, specialist }) => {
           const isSelected = specialist.id === selectedId;
+          const isSynced = syncedSet.has(specialist.id);
           const { overall, ratingScore, travelTimeScore, distanceScore, weights } =
             pick.scoreBreakdown;
-          // Exact proportional contributions out of 100
           const ratingContrib = Math.max(0, Math.round(ratingScore * weights.rating));
           const timeContrib = Math.max(0, Math.round(travelTimeScore * weights.travelTime));
           const distContrib = Math.max(0, Math.round(distanceScore * weights.distance));
           const distLabel = formatDistance(specialist.distanceMeters);
+          const dirHref = buildPlaceDirectionsUrl(origin, specialist, travelMode);
 
           return (
             <li
               key={specialist.id}
+              onMouseEnter={() => onHoverSpecialist(specialist.id)}
+              onMouseLeave={() => onHoverSpecialist(null)}
               className={`p-2.5 transition-colors ${
                 isSelected ? 'bg-[var(--accent-soft)]/50' : 'hover:bg-[var(--surface-subtle)]/50'
               }`}
@@ -197,7 +217,7 @@ export function SynthesisSummaryCard({
                 </button>
 
                 <div className="flex-1 min-w-0 space-y-1">
-                  {/* Name + Weighted Total Score */}
+                  {/* Name + Weighted Total Score + Shortlist Checkbox */}
                   <div className="flex items-start justify-between gap-2">
                     <button
                       type="button"
@@ -212,14 +232,32 @@ export function SynthesisSummaryCard({
                       </span>
                     </button>
 
-                    <div
-                      className="shrink-0 text-right tabular-nums"
-                      title={`Weighted score ${overall}/100 (Rating ${ratingScore}, Time ${travelTimeScore}, Distance ${distanceScore})`}
-                    >
-                      <span className="font-mono text-sm font-bold text-[var(--ink)] leading-none">
-                        {overall}
-                      </span>
-                      <span className="text-[10px] text-[var(--muted)]">/100</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div
+                        className="text-right tabular-nums"
+                        title={`Weighted score ${overall}/100 (Rating ${ratingScore}, Time ${travelTimeScore}, Distance ${distanceScore})`}
+                      >
+                        <span className="font-mono text-sm font-bold text-[var(--ink)] leading-none">
+                          {overall}
+                        </span>
+                        <span className="text-[10px] text-[var(--muted)]">/100</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={isSynced}
+                        aria-label={`Shortlist ${specialist.name} for Google Maps`}
+                        title={isSynced ? 'Remove from shortlist' : 'Shortlist for Google Maps'}
+                        onClick={() => onToggleSyncId(specialist.id)}
+                        className={`relative before:absolute before:-inset-2.5 sm:before:-inset-1.5 flex items-center justify-center w-5 h-5 rounded border transition-colors shrink-0 cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] ${
+                          isSynced
+                            ? 'bg-[var(--ink)] border-[var(--ink)] text-[var(--surface)]'
+                            : 'bg-[var(--surface)] border-[var(--control-line)] text-transparent hover:border-[var(--accent)]'
+                        }`}
+                      >
+                        <Check className="w-3 h-3 stroke-[2.75]" aria-hidden="true" />
+                      </button>
                     </div>
                   </div>
 
@@ -253,7 +291,7 @@ export function SynthesisSummaryCard({
                   </div>
 
                   {/* Proportional 3-Factor Weighted Score Graphic Bar */}
-                  <div className="space-y-0.5 pt-0.5">
+                  <div className="pt-0.5">
                     <div
                       className="w-full h-1.5 rounded-full bg-[var(--surface-subtle)] border border-[var(--line)]/60 overflow-hidden flex"
                       role="img"
@@ -274,13 +312,13 @@ export function SynthesisSummaryCard({
                         className="h-full transition-[width] duration-300"
                         style={{
                           width: `${distContrib}%`,
-                          backgroundColor: 'var(--status-open)',
+                          backgroundColor: 'var(--chart-distance)',
                         }}
                       />
                     </div>
                   </div>
 
-                  {/* Hours + Details Trigger */}
+                  {/* Hours + Route / Details Actions */}
                   <div className="flex items-center justify-between gap-2 pt-0.5">
                     <div className="min-w-0 flex items-center gap-1 text-[11px] truncate">
                       {specialist.openNow != null && (
@@ -303,14 +341,40 @@ export function SynthesisSummaryCard({
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => onInspectDetails(specialist.id)}
-                      className="inline-flex items-center gap-1 min-h-[34px] sm:min-h-[26px] px-2 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] rounded-md shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-                    >
-                      <Info className="w-3 h-3" aria-hidden="true" />
-                      <span>Details</span>
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {dirHref && (
+                        <a
+                          href={dirHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-1.5 text-[11px] font-medium text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-subtle)] rounded-md focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                        >
+                          <Navigation className="w-3 h-3" aria-hidden="true" />
+                          <span>Route</span>
+                          <span className="sr-only"> to {specialist.name}</span>
+                        </a>
+                      )}
+                      {onAskAboutSpecialist && (
+                        <button
+                          type="button"
+                          onClick={() => onAskAboutSpecialist(specialist)}
+                          className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2 text-[11px] font-medium text-[var(--ink)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] border border-[var(--line)] rounded-md shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                        >
+                          <MessageSquare className="w-3 h-3 text-[var(--muted)]" aria-hidden="true" />
+                          <span>Ask</span>
+                          <span className="sr-only"> agent about {specialist.name}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onInspectDetails(specialist.id)}
+                        className="inline-flex items-center gap-1 min-h-[36px] sm:min-h-[26px] px-2.5 text-[11px] font-semibold text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] border border-[var(--accent)]/35 rounded-md shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                      >
+                        <Info className="w-3 h-3" aria-hidden="true" />
+                        <span>Details</span>
+                        <span className="sr-only"> for {specialist.name}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Concise Review / Editorial Synthesis Line */}
