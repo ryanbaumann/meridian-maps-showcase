@@ -10,6 +10,7 @@ import type {
   TravelMode,
 } from '../types.ts';
 import { buildRankedSynthesis } from '../utils/synthesis.ts';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput.tsx';
 import { PlaceDetailView } from './PlaceDetailView.tsx';
 import { SynthesisSummaryCard } from './SynthesisSummaryCard.tsx';
 
@@ -33,6 +34,7 @@ interface GenUiBlockRendererProps {
   onChangeSortMode: (mode: SortMode) => void;
   onUseGps: () => void;
   onSubmitLocationText: (locationText: string) => void;
+  onSelectOrigin: (origin: OriginLocation) => void;
   onAskAboutClinic: (specialist: Specialist) => void;
   onAskQuestion: (question: string) => void;
   onOpenDetails: (id: string) => void;
@@ -58,6 +60,7 @@ export function GenUiBlockRenderer({
   onChangeSortMode,
   onUseGps,
   onSubmitLocationText,
+  onSelectOrigin,
   onAskAboutClinic,
   onAskQuestion,
   onOpenDetails,
@@ -90,16 +93,18 @@ export function GenUiBlockRenderer({
           <label htmlFor={inlineLocationId} className="sr-only">
             Starting location
           </label>
-          <input
+          <AddressAutocompleteInput
             id={inlineLocationId}
             name="location"
-            type="text"
-            autoComplete="street-address"
-            enterKeyHint="go"
             value={inlineLocation}
-            onChange={(e) => setInlineLocation(e.target.value)}
+            onChange={setInlineLocation}
+            onSelectOrigin={(selected) => {
+              setInlineLocation('');
+              onSelectOrigin(selected);
+            }}
+            locationBiasCenter={origin ? { lat: origin.lat, lng: origin.lng } : null}
             placeholder="City, ZIP, or street..."
-            className="flex-1 min-w-0 min-h-[44px] sm:min-h-[38px] px-3 text-base sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--surface)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+            className="min-h-[44px] sm:min-h-[38px] px-3 text-base sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--surface)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
           />
           <button
             type="submit"

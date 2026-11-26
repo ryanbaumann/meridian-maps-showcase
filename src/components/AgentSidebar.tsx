@@ -47,6 +47,7 @@ import {
 } from '../utils/mapsSync.ts';
 import { formatTravelTime } from '../utils/ranking.ts';
 import { safeExternalUrl } from '../utils/url.ts';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput.tsx';
 import { GenUiBlockRenderer } from './GenUiBlocks.tsx';
 import { PlaceDetailView } from './PlaceDetailView.tsx';
 
@@ -73,6 +74,7 @@ interface AgentSidebarProps {
   onSubmitMessage: (message: string) => void;
   onUseGps: () => void;
   onSetLocationText: (locationText: string) => void;
+  onSelectOrigin: (origin: OriginLocation) => void;
   onChangeSortMode: (mode: SortMode) => void;
   onSelectSpecialist: (id: string) => void;
   onOpenDetails: (id: string) => void;
@@ -112,6 +114,7 @@ export function AgentSidebar({
   onSubmitMessage,
   onUseGps,
   onSetLocationText,
+  onSelectOrigin,
   onChangeSortMode,
   onSelectSpecialist,
   onOpenDetails,
@@ -235,6 +238,18 @@ export function AgentSidebar({
     onSetLocationText(trimmed);
   };
 
+  const handleHeaderOriginSelect = (selected: OriginLocation) => {
+    setEditingLocation(false);
+    setLocationDraft(selected.label);
+    onSelectOrigin(selected);
+  };
+
+  const handleWelcomeOriginSelect = (selected: OriginLocation) => {
+    setWelcomeLocationDraft('');
+    onChangeMobileSnap('full');
+    onSelectOrigin(selected);
+  };
+
   const handleAskAboutClinic = (clinic: Specialist) => {
     if (isLoading) return;
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
@@ -321,7 +336,7 @@ export function AgentSidebar({
       <header
         onTouchStart={handleGrabTouchStart}
         onTouchEnd={handleGrabTouchEnd}
-        className={`px-3 lg:px-3.5 pt-1.5 pb-1.5 lg:py-2 border-b border-[var(--line)]/80 shrink-0 space-y-1.5 lg:space-y-2 touch-pan-x ${
+        className={`relative z-20 px-3 lg:px-3.5 pt-1.5 pb-1.5 lg:py-2 border-b border-[var(--line)]/80 shrink-0 space-y-1.5 lg:space-y-2 touch-pan-x ${
           mobileSnap === 'peek' && !peekSpecialist
             ? 'pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:pb-2'
             : ''
@@ -444,17 +459,16 @@ export function AgentSidebar({
             <label htmlFor={locationInputId} className="sr-only">
               Starting location
             </label>
-            <input
+            <AddressAutocompleteInput
               id={locationInputId}
               name="location"
-              type="text"
-              autoComplete="street-address"
-              enterKeyHint="go"
               autoFocus
               value={locationDraft}
-              onChange={(e) => setLocationDraft(e.target.value)}
+              onChange={setLocationDraft}
+              onSelectOrigin={handleHeaderOriginSelect}
+              locationBiasCenter={origin ? { lat: origin.lat, lng: origin.lng } : null}
               placeholder="City, ZIP, or street..."
-              className="flex-1 min-w-0 min-h-[44px] sm:min-h-[36px] px-2.5 text-base sm:text-xs text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--bg)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+              className="min-h-[44px] sm:min-h-[36px] px-2.5 text-base sm:text-xs text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--bg)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
             />
             <button
               type="submit"
@@ -601,17 +615,16 @@ export function AgentSidebar({
                         Starting address, city, or ZIP
                       </label>
                       <div className="flex items-center gap-1.5">
-                        <input
+                        <AddressAutocompleteInput
                           id={welcomeLocationId}
                           name="street-address"
-                          type="text"
-                          autoComplete="street-address"
-                          enterKeyHint="go"
                           required
+                          disabled={isLoading}
                           value={welcomeLocationDraft}
-                          onChange={(e) => setWelcomeLocationDraft(e.target.value)}
+                          onChange={setWelcomeLocationDraft}
+                          onSelectOrigin={handleWelcomeOriginSelect}
                           placeholder="Street address, city, or ZIP..."
-                          className="flex-1 min-w-0 min-h-[44px] sm:min-h-[38px] px-3 text-base sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--surface)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
+                          className="min-h-[44px] sm:min-h-[38px] px-3 text-base sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] bg-[var(--surface)] border border-[var(--control-line)] rounded-lg focus:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]"
                         />
                         <button
                           type="submit"
@@ -816,6 +829,7 @@ export function AgentSidebar({
                     onChangeSortMode={onChangeSortMode}
                     onUseGps={onUseGps}
                     onSubmitLocationText={onSetLocationText}
+                    onSelectOrigin={onSelectOrigin}
                     onAskAboutClinic={handleAskAboutClinic}
                     onAskQuestion={handleAskInspectorQuestion}
                     onOpenDetails={onOpenDetails}

@@ -479,6 +479,47 @@ export default function App() {
     [origin, activeSpecialty, travelMode, runAgentRequest]
   );
 
+  const handleSelectOrigin = useCallback(
+    async (selectedOrigin: OriginLocation) => {
+      activeRequestAbortRef.current?.abort();
+      requestSeqRef.current += 1;
+      setPendingClientFallback(null);
+      setOrigin(selectedOrigin);
+
+      if (activeSpecialty) {
+        await runAgentRequest({
+          message: `${activeSpecialty} near ${selectedOrigin.label}`,
+          displayUserText: `Start from ${selectedOrigin.label}`,
+          explicitSpecialty: activeSpecialty,
+          overrideOrigin: selectedOrigin,
+        });
+      } else {
+        setRawSpecialists([]);
+        setSelectedId(null);
+        setInspectedId(null);
+        setSyncedIds([]);
+        setIsLoading(false);
+        setTurns((prev) => [
+          ...prev,
+          { id: makeTurnId('u'), role: 'user', text: selectedOrigin.label },
+          {
+            id: makeTurnId('a'),
+            role: 'assistant',
+            text: `Centered on ${selectedOrigin.label}. Pick a specialist below.`,
+            suggestedFollowUps: buildContextualFollowUps({
+              origin: selectedOrigin,
+              specialists: [],
+              travelMode,
+              actionJustTaken: 'set_location_only',
+              syncedCount: 0,
+            }),
+          },
+        ]);
+      }
+    },
+    [activeSpecialty, travelMode, runAgentRequest]
+  );
+
   const handleUseGps = useCallback(() => {
     if (!navigator.geolocation) {
       setTurns((prev) => [
@@ -924,6 +965,7 @@ export default function App() {
               onSubmitMessage={(msg) => runAgentRequest({ message: msg })}
               onUseGps={handleUseGps}
               onSetLocationText={handleSetLocationText}
+              onSelectOrigin={handleSelectOrigin}
               onChangeSortMode={setSortMode}
               onSelectSpecialist={handleSelectSpecialistFromSidebar}
               onOpenDetails={handleOpenDetails}

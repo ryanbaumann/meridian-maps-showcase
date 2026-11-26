@@ -109,6 +109,9 @@ export function PhotorealisticMap3D({
   const modelsRef = useRef<HTMLElement[]>([]);
   const polylineRef = useRef<HTMLElement | null>(null);
   const orbitGenRef = useRef(0);
+  const isProgrammaticAnimRef = useRef(false);
+  const animSafetyTimerRef = useRef<number | null>(null);
+  const didMountForMapRef = useRef<Map3DElementShape | null>(null);
 
   const onSelectRef = useRef(onSelectSpecialist);
   onSelectRef.current = onSelectSpecialist;
@@ -185,44 +188,73 @@ export function PhotorealisticMap3D({
       map3d.style.height = '100%';
       map3d.style.display = 'block';
 
-      const stopAnimationOnUserGesture = () => {
+      const clearProgrammaticAnim = () => {
+        isProgrammaticAnimRef.current = false;
+        if (animSafetyTimerRef.current != null) {
+          window.clearTimeout(animSafetyTimerRef.current);
+          animSafetyTimerRef.current = null;
+        }
+      };
+
+      const stopProgrammaticAnimIfRunning = () => {
+        if (!isProgrammaticAnimRef.current) return;
         orbitGenRef.current += 1;
+        clearProgrammaticAnim();
         try {
           map3d.stopCameraAnimation?.();
         } catch {
           // Ignore if idle
         }
-        if (camera3DViewRef.current !== 'free') {
+      };
+
+      // Distinguish mouse pan drags (>6px) from marker/beacon clicks without ever
+      // calling stopCameraAnimation() mid-drag or triggering React re-renders while dragging.
+      let pointerDownPos: { x: number; y: number } | null = null;
+      let didDrag = false;
+
+      const onPointerDown = (e: PointerEvent) => {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+        didDrag = false;
+        // Stop any in-flight programmatic animation BEFORE the drag begins so pan starts on pixel 1
+        stopProgrammaticAnimIfRunning();
+      };
+
+      const onPointerMove = (e: PointerEvent) => {
+        if (!pointerDownPos || didDrag) return;
+        const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+        if (dist > 6) {
+          didDrag = true;
+        }
+      };
+
+      const onPointerEnd = () => {
+        const wasDrag = didDrag;
+        pointerDownPos = null;
+        didDrag = false;
+        if (wasDrag && camera3DViewRef.current !== 'free') {
           onCamera3DViewChangeRef.current('free');
         }
       };
 
-      // Distinguish drags (>6px) from marker/beacon clicks so gmp-click sees the live preset
-      let pointerDownPos: { x: number; y: number } | null = null;
-      const onPointerDown = (e: PointerEvent) => {
-        pointerDownPos = { x: e.clientX, y: e.clientY };
-      };
-      const onPointerMove = (e: PointerEvent) => {
-        if (!pointerDownPos) return;
-        const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
-        if (dist > 6) {
-          pointerDownPos = null;
-          stopAnimationOnUserGesture();
+      const onWheel = () => {
+        stopProgrammaticAnimIfRunning();
+        if (camera3DViewRef.current !== 'free') {
+          onCamera3DViewChangeRef.current('free');
         }
-      };
-      const clearPointerDown = () => {
-        pointerDownPos = null;
       };
 
       const onError = () => {
         setInitError('WebGL2 or 3D tiles unavailable in this browser.');
       };
 
-      map3d.addEventListener('pointerdown', onPointerDown, { passive: true });
-      map3d.addEventListener('pointermove', onPointerMove, { passive: true });
-      map3d.addEventListener('pointerup', clearPointerDown, { passive: true });
-      map3d.addEventListener('pointercancel', clearPointerDown, { passive: true });
-      map3d.addEventListener('wheel', stopAnimationOnUserGesture, { passive: true });
+      // Use capture phase on the host container so Shadow DOM event handling inside
+      // <gmp-map-3d> never blocks detection while still letting native gestures run untouched.
+      container.addEventListener('pointerdown', onPointerDown, { capture: true, passive: true });
+      window.addEventListener('pointermove', onPointerMove, { passive: true });
+      window.addEventListener('pointerup', onPointerEnd, { passive: true });
+      window.addEventListener('pointercancel', onPointerEnd, { passive: true });
+      container.addEventListener('wheel', onWheel, { capture: true, passive: true });
+      map3d.addEventListener('gmp-animationend', clearProgrammaticAnim);
       map3d.addEventListener('gmp-error', onError);
 
       container.replaceChildren(map3d);
@@ -231,11 +263,13 @@ export function PhotorealisticMap3D({
 
       return () => {
         orbitGenRef.current += 1;
-        map3d.removeEventListener('pointerdown', onPointerDown);
-        map3d.removeEventListener('pointermove', onPointerMove);
-        map3d.removeEventListener('pointerup', clearPointerDown);
-        map3d.removeEventListener('pointercancel', clearPointerDown);
-        map3d.removeEventListener('wheel', stopAnimationOnUserGesture);
+        clearProgrammaticAnim();
+        container.removeEventListener('pointerdown', onPointerDown, { capture: true });
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerEnd);
+        window.removeEventListener('pointercancel', onPointerEnd);
+        container.removeEventListener('wheel', onWheel, { capture: true });
+        map3d.removeEventListener('gmp-animationend', clearProgrammaticAnim);
         map3d.removeEventListener('gmp-error', onError);
         markersRef.current.forEach((el) => el.remove());
         markersRef.current = [];
@@ -772,7 +806,15 @@ export function PhotorealisticMap3D({
   // Multi-view 3D camera controller: corridor, street approach, aerial overview, and 360° orbit
   useEffect(() => {
     const map3d = map3dRef.current;
-    if (!map3d || camera3DView === 'free') return;
+    if (!map3d) return;
+
+    const isFreshMapInstance = didMountForMapRef.current !== map3d;
+    didMountForMapRef.current = map3d;
+
+    // Map3DElement was already initialized at initialCamera on mount; skip a redundant no-op
+    // flyCameraTo so mouse panning works immediately on frame 1.
+    if (isFreshMapInstance && camera3DView !== 'orbit') return;
+    if (camera3DView === 'free') return;
 
     const myGen = ++orbitGenRef.current;
     const reduced = prefersReducedMotion();
@@ -781,10 +823,24 @@ export function PhotorealisticMap3D({
     const focusedPoint =
       focusedLat != null && focusedLng != null ? { lat: focusedLat, lng: focusedLng } : null;
 
-    try {
-      map3d.stopCameraAnimation?.();
-    } catch {
-      // Ignore if idle
+    const markAnimRunning = (durationMs: number) => {
+      isProgrammaticAnimRef.current = true;
+      if (animSafetyTimerRef.current != null) {
+        window.clearTimeout(animSafetyTimerRef.current);
+      }
+      animSafetyTimerRef.current = window.setTimeout(() => {
+        isProgrammaticAnimRef.current = false;
+        animSafetyTimerRef.current = null;
+      }, durationMs + 200);
+    };
+
+    if (isProgrammaticAnimRef.current) {
+      isProgrammaticAnimRef.current = false;
+      try {
+        map3d.stopCameraAnimation?.();
+      } catch {
+        // Ignore if idle
+      }
     }
 
     const meshMode =
@@ -817,6 +873,7 @@ export function PhotorealisticMap3D({
       }
 
       const onOrbitDone = () => {
+        isProgrammaticAnimRef.current = false;
         if (orbitGenRef.current === myGen) {
           onCamera3DViewChangeRef.current('street');
         }
@@ -826,12 +883,14 @@ export function PhotorealisticMap3D({
         if (orbitGenRef.current !== myGen) return;
         map3d.addEventListener('gmp-animationend', onOrbitDone, { once: true });
         try {
+          markAnimRunning(18000);
           map3d.flyCameraAround?.({
             camera: orbitCamera,
             durationMillis: 18000,
             repeatCount: 1,
           });
         } catch {
+          isProgrammaticAnimRef.current = false;
           map3d.removeEventListener('gmp-animationend', onOrbitDone);
           onCamera3DViewChangeRef.current('street');
         }
@@ -843,8 +902,10 @@ export function PhotorealisticMap3D({
         if (typeof map3d.flyCameraTo === 'function') {
           map3d.addEventListener('gmp-animationend', startOrbit, { once: true });
           try {
+            markAnimRunning(1100);
             map3d.flyCameraTo({ endCamera: orbitCamera, durationMillis: 1100 });
           } catch {
+            isProgrammaticAnimRef.current = false;
             map3d.removeEventListener('gmp-animationend', startOrbit);
             startOrbit();
           }
@@ -858,10 +919,13 @@ export function PhotorealisticMap3D({
         window.clearTimeout(launchTimer);
         map3d.removeEventListener('gmp-animationend', startOrbit);
         map3d.removeEventListener('gmp-animationend', onOrbitDone);
-        try {
-          map3d.stopCameraAnimation?.();
-        } catch {
-          // Ignore
+        if (isProgrammaticAnimRef.current) {
+          isProgrammaticAnimRef.current = false;
+          try {
+            map3d.stopCameraAnimation?.();
+          } catch {
+            // Ignore
+          }
         }
       };
     }
@@ -880,13 +944,18 @@ export function PhotorealisticMap3D({
     const endCamera = { ...baseEndCamera, altitudeMode: meshMode };
 
     if (typeof map3d.flyCameraTo === 'function') {
+      const durationMillis = reduced ? 0 : preset === 'street' ? 1400 : 1200;
       try {
+        if (durationMillis > 0) {
+          markAnimRunning(durationMillis);
+        }
         map3d.flyCameraTo({
           endCamera,
-          durationMillis: reduced ? 0 : preset === 'street' ? 1400 : 1200,
+          durationMillis,
         });
         return;
       } catch {
+        isProgrammaticAnimRef.current = false;
         // Fall through to direct assignment
       }
     }
@@ -895,6 +964,7 @@ export function PhotorealisticMap3D({
     map3d.range = endCamera.range;
     map3d.tilt = endCamera.tilt;
     map3d.heading = endCamera.heading;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     maps3dLib,
     originLat,
@@ -905,19 +975,17 @@ export function PhotorealisticMap3D({
     focusedLng,
     recenterSignal,
     camera3DView,
-    framing.leftInsetPx,
-    framing.bottomInsetPx,
-    framing.widthPx,
-    framing.heightPx,
-    framing.topInsetPx,
   ]);
 
   return (
     <div
-      className="relative w-full h-full bg-[var(--bg)]"
+      className="relative w-full h-full bg-[var(--bg)] select-none"
       data-testid="map-3d-stage"
     >
-      <div ref={containerRef} className="w-full h-full" />
+      <div
+        ref={containerRef}
+        className="w-full h-full touch-none cursor-grab active:cursor-grabbing"
+      />
 
       {!maps3dLib && !initError && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--bg)]/85 text-sm font-medium text-[var(--muted)]">
